@@ -1,6 +1,6 @@
 # Car Lyrics
 
-An Android karaoke companion experiment for the connected Pixel 7a. The first milestone is a phone app that follows music already playing in Spotify or YouTube Music and displays user supplied, time stamped lyrics. Android Auto display support is a research gate, not an assumed capability.
+An Android Auto car-screen karaoke experiment for a 2021 Mazda CX-5 and a connected Pixel 7a. The first milestone is a local prototype that follows Spotify playback, draws time stamped lyrics on the car display, and works with the Mazda Commander knob. Spotify Premium is available for development.
 
 See [the implementation plan](docs/PLAN.md) for scope, evidence, milestones, and acceptance checks.
 
@@ -10,4 +10,4 @@ Planning only. No app has been built, installed, or published. This is a separat
 
 ## Reference project
 
-`../car-dashboard` provides a working Gradle, Kotlin, and connected Pixel development setup. Its Android Auto service uses the Point of Interest category and a map surface for an instrument prototype. Those declarations are specific to that experiment; they must not be copied to make a lyric screen appear in Android Auto.
+`../car-dashboard` provides a working Gradle, Kotlin, Android Auto surface, Mazda knob, and connected Pixel development setup. Its Android Auto service uses the Point of Interest category and a map surface for an instrument prototype. That demonstrates a private technical prototype path, but Google's POI category is intended for POI functionality and a map, so distribution remains a separate feasibility question.
