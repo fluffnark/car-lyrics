@@ -39,7 +39,7 @@ class CarLyricsScreenTest {
         assertEquals("Sing King • Recent", browse.header!!.title.toString())
         val first = browse.singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
         assertNotNull(first.image)
-        assertTrue(first.onClickDelegate!!.isParkedOnly)
+        assertFalse(first.onClickDelegate!!.isParkedOnly)
         first.onClickDelegate!!.sendClick(done)
 
         assertEquals(videos.first(), player.selected)
@@ -79,7 +79,7 @@ class CarLyricsScreenTest {
         player.onStatus?.invoke(PlaybackStatus.ERROR)
         val error = screen.onGetTemplate() as MapWithContentTemplate
         assertEquals("Retry", error.actionStrip!!.actions[0].title.toString())
-        assertTrue(error.actionStrip!!.actions[0].onClickDelegate!!.isParkedOnly)
+        assertFalse(error.actionStrip!!.actions[0].onClickDelegate!!.isParkedOnly)
         error.actionStrip!!.actions[0].onClickDelegate!!.sendClick(done)
         assertEquals(1, player.resumes)
     }

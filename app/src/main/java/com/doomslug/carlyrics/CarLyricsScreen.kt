@@ -16,7 +16,6 @@ import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Pane
 import androidx.car.app.model.PaneTemplate
-import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
@@ -56,7 +55,6 @@ class CarLyricsScreen(
         val speed = value.value
         if (value.status == CarValue.STATUS_SUCCESS && speed != null) {
             val nowMoving = speed > 0.5f
-            if (nowMoving && !moving) browse()
             moving = nowMoving
         }
     }
@@ -141,9 +139,7 @@ class CarLyricsScreen(
                     .setTitle(video.title.take(72))
                     .addText(if (source == Source.SAVED) "Saved • Sing King" else "Sing King • Karaoke")
                     .setImage(CarIcon.Builder(icon).build(), Row.IMAGE_TYPE_SMALL)
-                    .setOnClickListener(ParkedOnlyOnClickListener.create {
-                        if (!moving) select(videos, page * PAGE_SIZE + offset)
-                    }).build())
+                    .setOnClickListener { select(videos, page * PAGE_SIZE + offset) }.build())
             }
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                 Thumbnails.request(visible) { if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && mode == Mode.BROWSE) invalidate() }
@@ -175,7 +171,7 @@ class CarLyricsScreen(
         val list = ItemList.Builder().setNoItemsMessage(if (searchQuery.isBlank()) "Type or say a song, artist, album, or genre" else "No matching karaoke videos")
         matches.take(30).forEach { video ->
             list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("Sing King • karaoke")
-                .setOnClickListener(ParkedOnlyOnClickListener.create { select(matches, matches.indexOf(video)) }).build())
+                .setOnClickListener { select(matches, matches.indexOf(video)) }.build())
         }
         return SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
             override fun onSearchTextChanged(searchText: String) { searchQuery = searchText; invalidate() }
@@ -204,7 +200,7 @@ class CarLyricsScreen(
         val list = ItemList.Builder().setNoItemsMessage("Add songs from the player with Queue")
         items.forEach { video ->
             list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("Queued")
-                .setOnClickListener(ParkedOnlyOnClickListener.create { select(items, items.indexOf(video)) }).build())
+                .setOnClickListener { select(items, items.indexOf(video)) }.build())
         }
         return ListTemplate.Builder().setHeader(Header.Builder().setTitle("Up next • ${items.size}").setStartHeaderAction(Action.APP_ICON).build())
             .setSingleList(list.build()).build()
@@ -225,7 +221,7 @@ class CarLyricsScreen(
         val list = ItemList.Builder().setNoItemsMessage("Add songs from the player with Add to mix")
         playlist.videos.forEach { video ->
             list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("${playlist.name} • karaoke")
-                .setOnClickListener(ParkedOnlyOnClickListener.create { select(playlist.videos, playlist.videos.indexOf(video)) }).build())
+                .setOnClickListener { select(playlist.videos, playlist.videos.indexOf(video)) }.build())
         }
         return ListTemplate.Builder().setHeader(Header.Builder().setTitle(playlist.name).setStartHeaderAction(Action.APP_ICON).build())
             .setSingleList(list.build()).build()
@@ -245,9 +241,9 @@ class CarLyricsScreen(
             .setTitle(current?.title?.take(72) ?: "Sing King")
             .addText(state).build())
         pane.addAction(Action.Builder().setTitle("Previous")
-            .setOnClickListener(ParkedOnlyOnClickListener.create { step(-1) }).build())
+            .setOnClickListener { step(-1) }.build())
         pane.addAction(Action.Builder().setTitle("Next")
-            .setOnClickListener(ParkedOnlyOnClickListener.create { step(1) }).build())
+            .setOnClickListener { step(1) }.build())
         val playbackAction = when (playback) {
             PlaybackStatus.LOADING, PlaybackStatus.PLAYING -> Action.Builder()
                 .setTitle("Pause").setIcon(icon(R.drawable.ic_pause))
@@ -255,9 +251,7 @@ class CarLyricsScreen(
             else -> Action.Builder()
                 .setTitle(if (playback == PlaybackStatus.ERROR) "Retry" else "Play")
                 .setIcon(icon(R.drawable.ic_play))
-                .setOnClickListener(ParkedOnlyOnClickListener.create {
-                    if (!moving) { player.resume(); playback = PlaybackStatus.LOADING; invalidate() }
-                }).build()
+                .setOnClickListener { player.resume(); playback = PlaybackStatus.LOADING; invalidate() }.build()
         }
         val savedAction = Action.Builder()
             .setTitle(if (current != null && playlists.contains("My karaoke mix", current.id)) "In mix" else "Add to mix")
@@ -312,7 +306,7 @@ class CarLyricsScreen(
     }
 
     private fun step(delta: Int) {
-        if (moving || queue.isEmpty()) return
+        if (queue.isEmpty()) return
         selected = (selected + delta + queue.size) % queue.size
         playback = PlaybackStatus.LOADING
         player.select(queue[selected])
