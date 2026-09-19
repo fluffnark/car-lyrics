@@ -12,7 +12,9 @@ class CarLyricsService : CarAppService() {
     override fun createHostValidator(): HostValidator =
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0)
             HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
-        else HostValidator.Builder(this).build()
+        else HostValidator.Builder(this)
+            .addAllowedHosts(R.array.car_app_hosts_allowlist)
+            .build()
 
     override fun onCreateSession(sessionInfo: SessionInfo): Session = object : Session() {
         override fun onCreateScreen(intent: Intent): Screen = CarLyricsScreen(carContext)
