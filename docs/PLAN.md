@@ -1,5 +1,7 @@
 # Car Lyrics: Mazda car-screen prototype plan
 
+> Superseded exploration: the implemented September 19 MVP uses Morphe YouTube app-window capture for instrumental karaoke video. See the root README for its build, test flow, and limitations. The Spotify plan below is retained as prior research.
+
 Updated 2026-09-19 after confirming the target: lyrics must appear on the 2021 Mazda CX-5 display and all app controls must work with its Commander knob. The connected Pixel 7a runs Android 17 and has Spotify and YouTube Music installed. Spotify Premium is available. This is a separate repository from `car-dashboard`; its unrelated local changes were left untouched.
 
 ## Goal and working architecture

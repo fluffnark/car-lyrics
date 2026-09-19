@@ -1,5 +1,7 @@
 # Lyric-ready library and playback workflow
 
+> Earlier Spotify concept. The current APK mirrors Morphe YouTube karaoke video; it does not import Spotify albums, filter playlists, or fetch timed lyrics.
+
 Updated 2026-09-19. Target: build playlists, select albums, and shuffle mixes **inside Car Lyrics**, with browsing and playback controls reachable by the 2021 Mazda CX-5 Commander knob. Spotify Premium is the audio source; LRCLIB and imported `.lrc` files provide lyrics. The app is a private Android Auto prototype.
 
 ## User flow
