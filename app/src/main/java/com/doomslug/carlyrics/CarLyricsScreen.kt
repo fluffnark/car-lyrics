@@ -1,5 +1,6 @@
 package com.doomslug.carlyrics
 
+import androidx.activity.OnBackPressedCallback
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
@@ -9,6 +10,8 @@ import androidx.car.app.hardware.common.OnCarDataAvailableListener
 import androidx.car.app.hardware.info.Speed
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
+import androidx.car.app.model.CarIcon
+import androidx.car.app.model.Header
 import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Pane
@@ -17,38 +20,55 @@ import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.MapWithContentTemplate
+import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 
-/** All selection and playback actions are host-rendered, so the Mazda knob can operate them. */
-class CarLyricsScreen(context: CarContext) : Screen(context), DefaultLifecycleObserver {
-    private val surface = YouTubeSurface(context)
+/** Host-rendered rows and actions support the Mazda Commander knob. */
+class CarLyricsScreen(
+    context: CarContext,
+    private val catalog: VideoCatalog = SingKingCatalog,
+    private val player: VideoPlayer = YouTubeSurface(context),
+    private val saved: SavedVideos = SavedVideos(context),
+) : Screen(context), DefaultLifecycleObserver {
+    private enum class Source { RECENT, SAVED }
+    private enum class Mode { BROWSE, PLAYER }
+    private var source = Source.RECENT
     private var mode = Mode.BROWSE
     private var page = 0
+    private var queue = emptyList<KaraokeVideo>()
     private var selected = -1
-    private var playing = false
+    private var playback = PlaybackStatus.IDLE
     private var moving = false
     private var speedRegistered = false
+    private val back = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { browse() }
+    }
     private val speedListener = OnCarDataAvailableListener<Speed> { reading ->
         val value = reading.rawSpeedMetersPerSecond
         val speed = value.value
         if (value.status == CarValue.STATUS_SUCCESS && speed != null) {
             val nowMoving = speed > 0.5f
-            if (nowMoving && !moving) {
-                surface.hide()
-                mode = Mode.BROWSE
-                playing = false
-                invalidate()
-            }
+            if (nowMoving && !moving) browse()
             moving = nowMoving
         }
     }
 
-    init { lifecycle.addObserver(this) }
+    init {
+        lifecycle.addObserver(this)
+        carContext.onBackPressedDispatcher.addCallback(this, back)
+        player.onStatus = { next ->
+            if (mode == Mode.PLAYER && playback != next) { playback = next; invalidate() }
+        }
+    }
 
     override fun onStart(owner: LifecycleOwner) {
-        carContext.getCarService(AppManager::class.java).setSurfaceCallback(surface)
-        if (SingKingCatalog.videos.isEmpty() && !SingKingCatalog.loading) refresh()
+        carContext.getCarService(AppManager::class.java).setSurfaceCallback(player)
+        if (catalog === SingKingCatalog) {
+            SingKingCatalog.initialize(carContext)
+            if (catalog.videos.isEmpty() || SingKingCatalog.isStale()) refresh()
+        } else if (catalog.videos.isEmpty() && !catalog.loading) refresh()
         speedRegistered = runCatching {
             carContext.getCarService(CarHardwareManager::class.java).carInfo
                 .addSpeedListener(carContext.mainExecutor, speedListener)
@@ -56,97 +76,151 @@ class CarLyricsScreen(context: CarContext) : Screen(context), DefaultLifecycleOb
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        surface.hide()
+        player.hide()
         mode = Mode.BROWSE
-        playing = false
+        back.isEnabled = false
+        playback = PlaybackStatus.IDLE
         if (speedRegistered) runCatching {
             carContext.getCarService(CarHardwareManager::class.java).carInfo.removeSpeedListener(speedListener)
         }
         speedRegistered = false
     }
 
-    override fun onDestroy(owner: LifecycleOwner) { surface.close() }
+    override fun onDestroy(owner: LifecycleOwner) { player.close() }
 
     override fun onGetTemplate(): Template = if (mode == Mode.BROWSE) browseTemplate() else playerTemplate()
 
     private fun browseTemplate(): Template {
-        val videos = SingKingCatalog.videos
+        val videos = currentVideos()
         val list = ItemList.Builder()
         if (videos.isEmpty()) {
-            list.addItem(Row.Builder().setTitle(
-                if (SingKingCatalog.loading) "Loading Sing King uploads…"
-                else SingKingCatalog.error ?: "No recent videos"
-            ).build())
-            if (!SingKingCatalog.loading) list.addItem(Row.Builder().setTitle("Retry")
+            list.addItem(Row.Builder().setTitle(when {
+                source == Source.SAVED -> "No saved songs yet"
+                catalog.loading -> "Loading Sing King videos…"
+                catalog.error != null -> catalog.error!!
+                else -> "No recent videos available"
+            }).addText(if (source == Source.SAVED) "Save a song from the player" else "Connect to the internet and retry").build())
+            if (source == Source.RECENT && !catalog.loading) list.addItem(Row.Builder().setTitle("Retry")
                 .setOnClickListener { refresh() }.build())
         } else {
             val maxPage = (videos.size - 1) / PAGE_SIZE
             page = page.coerceIn(0, maxPage)
-            if (page > 0) list.addItem(Row.Builder().setTitle("Previous videos")
+            if (page > 0) list.addItem(Row.Builder().setTitle("Previous page")
                 .setOnClickListener { page--; invalidate() }.build())
-            videos.drop(page * PAGE_SIZE).take(PAGE_SIZE).forEachIndexed { offset, video ->
-                val index = page * PAGE_SIZE + offset
-                list.addItem(Row.Builder().setTitle(video.title.take(64))
+            val visible = videos.drop(page * PAGE_SIZE).take(PAGE_SIZE)
+            visible.forEachIndexed { offset, video ->
+                val thumbnail = Thumbnails.get(video.id)
+                val icon = if (thumbnail != null) IconCompat.createWithBitmap(thumbnail)
+                    else IconCompat.createWithResource(carContext, R.drawable.ic_video)
+                list.addItem(Row.Builder()
+                    .setTitle(video.title.take(72))
+                    .addText(if (source == Source.SAVED) "Saved • Sing King" else "Sing King • Karaoke")
+                    .setImage(CarIcon.Builder(icon).build(), Row.IMAGE_TYPE_SMALL)
                     .setOnClickListener(ParkedOnlyOnClickListener.create {
-                        if (!moving) select(index)
+                        if (!moving) select(videos, page * PAGE_SIZE + offset)
                     }).build())
             }
-            if (page < maxPage) list.addItem(Row.Builder().setTitle("More videos")
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                Thumbnails.request(visible) { if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && mode == Mode.BROWSE) invalidate() }
+            }
+            if (page < maxPage) list.addItem(Row.Builder().setTitle("More songs  •  ${page + 2} of ${maxPage + 1}")
                 .setOnClickListener { page++; invalidate() }.build())
         }
-        return ListTemplate.Builder().setSingleList(list.build()).build()
+        val switch = Action.Builder()
+            .setTitle(if (source == Source.RECENT) "Saved" else "Recent")
+            .setIcon(icon(if (source == Source.RECENT) R.drawable.ic_saved else R.drawable.ic_browse))
+            .setOnClickListener {
+                source = if (source == Source.RECENT) Source.SAVED else Source.RECENT
+                page = 0
+                invalidate()
+            }.build()
+        val header = Header.Builder()
+            .setTitle(if (source == Source.RECENT) "Sing King • Recent" else "Saved karaoke songs")
+            .setStartHeaderAction(Action.APP_ICON)
+            .addEndHeaderAction(switch)
+            .build()
+        return ListTemplate.Builder().setHeader(header).setSingleList(list.build()).build()
     }
 
     private fun playerTemplate(): Template {
-        val current = SingKingCatalog.videos.getOrNull(selected)
+        val current = queue.getOrNull(selected)
+        val state = when (playback) {
+            PlaybackStatus.IDLE -> "Ready"
+            PlaybackStatus.LOADING -> "Loading video…"
+            PlaybackStatus.PLAYING -> "Playing • ${selected + 1} of ${queue.size}"
+            PlaybackStatus.PAUSED -> "Paused • ${selected + 1} of ${queue.size}"
+            PlaybackStatus.ENDED -> "Finished • choose Next"
+            PlaybackStatus.ERROR -> "Video unavailable • Retry or choose Next"
+        }
         val pane = Pane.Builder().addRow(Row.Builder()
-            .setTitle(current?.title?.take(50) ?: "Sing King")
-            .build())
+            .setTitle(current?.title?.take(72) ?: "Sing King")
+            .addText(state).build())
         pane.addAction(Action.Builder().setTitle("Previous")
             .setOnClickListener(ParkedOnlyOnClickListener.create { step(-1) }).build())
         pane.addAction(Action.Builder().setTitle("Next")
             .setOnClickListener(ParkedOnlyOnClickListener.create { step(1) }).build())
-        val playbackAction = if (playing) Action.Builder().setTitle("Pause")
-            .setOnClickListener { surface.pause(); playing = false; invalidate() }.build()
-        else Action.Builder().setTitle("Play")
-            .setOnClickListener(ParkedOnlyOnClickListener.create {
-                if (!moving) { surface.resume(); playing = true; invalidate() }
-            }).build()
+        val playbackAction = when (playback) {
+            PlaybackStatus.LOADING, PlaybackStatus.PLAYING -> Action.Builder()
+                .setTitle("Pause").setIcon(icon(R.drawable.ic_pause))
+                .setOnClickListener { player.pause(); playback = PlaybackStatus.PAUSED; invalidate() }.build()
+            else -> Action.Builder()
+                .setTitle(if (playback == PlaybackStatus.ERROR) "Retry" else "Play")
+                .setIcon(icon(R.drawable.ic_play))
+                .setOnClickListener(ParkedOnlyOnClickListener.create {
+                    if (!moving) { player.resume(); playback = PlaybackStatus.LOADING; invalidate() }
+                }).build()
+        }
+        val savedAction = Action.Builder()
+            .setTitle(if (current != null && saved.contains(current.id)) "Saved" else "Save")
+            .setIcon(icon(R.drawable.ic_saved))
+            .setOnClickListener {
+                current?.let { saved.toggle(it) }
+                invalidate()
+            }.build()
         val strip = ActionStrip.Builder()
             .addAction(playbackAction)
-            .addAction(Action.Builder().setTitle("Browse").setOnClickListener {
-                surface.hide()
-                mode = Mode.BROWSE
-                playing = false
-                invalidate()
-            }.build()).build()
+            .addAction(savedAction)
+            .addAction(Action.Builder().setTitle("Browse").setIcon(icon(R.drawable.ic_browse))
+                .setOnClickListener { browse() }.build()).build()
         return MapWithContentTemplate.Builder()
             .setContentTemplate(PaneTemplate.Builder(pane.build()).build())
-            .setActionStrip(strip)
-            .build()
+            .setActionStrip(strip).build()
     }
 
-    private fun select(index: Int) {
-        val video = SingKingCatalog.videos.getOrNull(index) ?: return
+    private fun icon(resource: Int) = CarIcon.Builder(IconCompat.createWithResource(carContext, resource)).build()
+    private fun currentVideos(): List<KaraokeVideo> = if (source == Source.RECENT) catalog.videos else saved.all()
+
+    private fun select(videos: List<KaraokeVideo>, index: Int) {
+        val video = videos.getOrNull(index) ?: return
+        queue = videos.toList()
         selected = index
         mode = Mode.PLAYER
-        playing = true
-        surface.select(video)
+        back.isEnabled = true
+        playback = PlaybackStatus.LOADING
+        player.select(video)
         invalidate()
     }
 
     private fun step(delta: Int) {
-        if (moving) return
-        val size = SingKingCatalog.videos.size
-        if (size == 0) return
-        select((selected + delta + size) % size)
-    }
-
-    private fun refresh() {
-        SingKingCatalog.refresh { if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) invalidate() }
+        if (moving || queue.isEmpty()) return
+        selected = (selected + delta + queue.size) % queue.size
+        playback = PlaybackStatus.LOADING
+        player.select(queue[selected])
         invalidate()
     }
 
-    private enum class Mode { BROWSE, PLAYER }
+    private fun browse() {
+        player.hide()
+        mode = Mode.BROWSE
+        back.isEnabled = false
+        playback = PlaybackStatus.IDLE
+        invalidate()
+    }
+
+    private fun refresh() {
+        catalog.refresh { if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) invalidate() }
+        invalidate()
+    }
+
     private companion object { const val PAGE_SIZE = 4 }
 }

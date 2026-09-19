@@ -1,65 +1,121 @@
 package com.doomslug.carlyrics
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Xml
+import org.json.JSONArray
+import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
-/** The channel's public Atom feed contains recent uploads and needs no user login. */
-object SingKingCatalog {
-    data class Video(val id: String, val title: String)
+/** Only video IDs and titles are stored. Video playback remains in YouTube's player. */
+data class KaraokeVideo(val id: String, val title: String) {
+    companion object { val ID = Regex("[A-Za-z0-9_-]{11}") }
+}
+
+interface VideoCatalog {
+    val videos: List<KaraokeVideo>
+    val loading: Boolean
+    val error: String?
+    fun refresh(done: () -> Unit)
+}
+
+internal object SingKingFeedParser {
+    fun parse(input: InputStream): List<KaraokeVideo> {
+        val parser = Xml.newPullParser()
+        parser.setInput(input, "UTF-8")
+        val result = LinkedHashMap<String, KaraokeVideo>()
+        var inEntry = false
+        var id: String? = null
+        var title: String? = null
+        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+            when (parser.eventType) {
+                XmlPullParser.START_TAG -> when (parser.name) {
+                    "entry" -> { inEntry = true; id = null; title = null }
+                    "videoId" -> if (inEntry) id = parser.nextText()
+                    "title" -> if (inEntry) title = parser.nextText()
+                }
+                XmlPullParser.END_TAG -> if (parser.name == "entry") {
+                    val videoId = id
+                    val videoTitle = title?.trim()
+                    if (videoId != null && KaraokeVideo.ID.matches(videoId) && !videoTitle.isNullOrBlank()) {
+                        result.putIfAbsent(videoId, KaraokeVideo(videoId, videoTitle))
+                    }
+                    inEntry = false
+                }
+            }
+            parser.next()
+        }
+        return result.values.toList()
+    }
+}
+
+/** Recent public channel uploads, kept on disk so a transient network failure retains browsing. */
+object SingKingCatalog : VideoCatalog {
     private const val FEED = "https://www.youtube.com/feeds/videos.xml?channel_id=UCwTRjvjVge51X-ILJ4i22ew"
+    private const val PREFS = "sing_king_catalog"
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    @Volatile var videos: List<Video> = emptyList()
+    private val callbacks = mutableListOf<() -> Unit>()
+    private var context: Context? = null
+    override var videos: List<KaraokeVideo> = emptyList()
         private set
-    @Volatile var loading = false
+    override var loading = false
         private set
-    @Volatile var error: String? = null
+    override var error: String? = null
+        private set
+    var lastUpdatedAt: Long = 0L
         private set
 
-    fun refresh(done: () -> Unit) {
+    fun initialize(appContext: Context) {
+        if (context != null) return
+        context = appContext.applicationContext
+        val prefs = context!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        lastUpdatedAt = prefs.getLong("updated_at", 0L)
+        val json = runCatching { JSONArray(prefs.getString("videos", "[]")) }.getOrDefault(JSONArray())
+        videos = (0 until json.length()).mapNotNull { index ->
+            val item = json.optJSONObject(index) ?: return@mapNotNull null
+            val id = item.optString("id")
+            val title = item.optString("title")
+            if (KaraokeVideo.ID.matches(id) && title.isNotBlank()) KaraokeVideo(id, title) else null
+        }
+    }
+
+    fun isStale(now: Long = System.currentTimeMillis()): Boolean = now - lastUpdatedAt > 6 * 60 * 60 * 1000L
+
+    override fun refresh(done: () -> Unit) {
+        callbacks.add(done)
         if (loading) return
         loading = true
         error = null
         worker.execute {
-            try {
+            val attempt = runCatching {
                 val connection = URL(FEED).openConnection() as HttpURLConnection
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 10_000
-                connection.setRequestProperty("User-Agent", "CarLyrics/0.2 (Android)")
-                try {
-                    connection.inputStream.use { input ->
-                        val parser = Xml.newPullParser()
-                        parser.setInput(input, "UTF-8")
-                        val result = mutableListOf<Video>()
-                        var inEntry = false
-                        var id: String? = null
-                        var title: String? = null
-                        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-                            when (parser.eventType) {
-                                XmlPullParser.START_TAG -> when (parser.name) {
-                                    "entry" -> { inEntry = true; id = null; title = null }
-                                    "videoId" -> if (inEntry) id = parser.nextText()
-                                    "title" -> if (inEntry) title = parser.nextText()
-                                }
-                                XmlPullParser.END_TAG -> if (parser.name == "entry") {
-                                    if (id?.matches(Regex("[A-Za-z0-9_-]{11}")) == true && !title.isNullOrBlank())
-                                        result.add(Video(id!!, title!!))
-                                    inEntry = false
-                                }
-                            }
-                            parser.next()
-                        }
-                        if (result.isEmpty()) error = "Sing King returned no videos"
-                        else videos = result
+                connection.setRequestProperty("User-Agent", "CarLyrics/0.3 (Android)")
+                try { connection.inputStream.use(SingKingFeedParser::parse) }
+                finally { connection.disconnect() }
+            }
+            main.post {
+                attempt.onSuccess { fetched ->
+                    if (fetched.isEmpty()) error = "Sing King returned no videos"
+                    else {
+                        videos = fetched
+                        lastUpdatedAt = System.currentTimeMillis()
+                        val json = JSONArray()
+                        fetched.forEach { json.put(JSONObject().put("id", it.id).put("title", it.title)) }
+                        context?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()
+                            ?.putString("videos", json.toString())?.putLong("updated_at", lastUpdatedAt)?.apply()
                     }
-                } finally { connection.disconnect() }
-            } catch (e: Exception) { error = e.message ?: "Could not load Sing King" }
-            finally { loading = false; main.post(done) }
+                }.onFailure { error = "Could not refresh Sing King. Check your connection." }
+                loading = false
+                callbacks.toList().also { callbacks.clear() }.forEach { it() }
+            }
         }
     }
 }
