@@ -10,7 +10,9 @@ A private Android Auto karaoke prototype for a 2021 Mazda CX-5. It lists recent 
 3. Use the Commander knob to pause, resume, skip, save a song, or return to browsing. The Saved/Recent header action switches lists. Hardware Back returns from the player to browsing.
 4. Browsing stops the video. If the car API reports movement, the app hides the player and returns to browsing.
 
-The catalog uses the channel's public Atom feed for fresh uploads and includes a generated local index of 5,000 Sing King titles plus curated playlist memberships. The index is title metadata only; playback still needs internet. Run `python3 tools/update_catalog.py` with `yt-dlp` to refresh it. Saved songs keep their titles and video IDs locally even after they leave the recent feed. Videos must allow embedding and may include ads. Morphe is no longer in the playback path because capturing its app window required phone consent every session.
+When a video is selected, **Queue** adds or removes it from the persistent Up Next list. **Add to mix** adds or removes it from `My karaoke mix` and the Saved list. Browse the Queue or Playlists rows at the top of the car screen to review a set, then choose any queued or playlist song to play it.
+
+The catalog uses the channel's public Atom feed for fresh uploads and includes a generated local index of 5,000 Sing King titles plus curated playlist memberships. The index is title metadata only; playback still needs internet. Run `python3 tools/update_catalog.py` with `yt-dlp` to refresh it. Queue, starter playlists, and saved songs persist locally on the phone. Videos must allow embedding and may include ads. Morphe is no longer in the playback path because capturing its app window required phone consent every session.
 
 ## Build and test status
 

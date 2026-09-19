@@ -25,7 +25,11 @@ class CarLyricsScreenTest {
     private val done = object : OnDoneCallback {}
     private val videos = (1..10).map { KaraokeVideo("%011d".format(it), "Song $it (Karaoke Version)") }
 
-    @Before fun clear() { app.getSharedPreferences("saved_videos", 0).edit().clear().commit() }
+    @Before fun clear() {
+        app.getSharedPreferences("saved_videos", 0).edit().clear().commit()
+        app.getSharedPreferences("karaoke_playlists", 0).edit().clear().commit()
+        app.getSharedPreferences("karaoke_queue", 0).edit().clear().commit()
+    }
 
     @Test fun rotaryBrowseSelectPauseSaveAndReturn() {
         val context = TestCarContext.createCarContext(app)
@@ -40,7 +44,7 @@ class CarLyricsScreenTest {
 
         assertEquals(videos.first(), player.selected)
         val loading = screen.onGetTemplate() as MapWithContentTemplate
-        assertEquals(3, loading.actionStrip!!.actions.size)
+        assertEquals(4, loading.actionStrip!!.actions.size)
         player.onStatus?.invoke(PlaybackStatus.PLAYING)
         val playing = screen.onGetTemplate() as MapWithContentTemplate
         assertEquals("Pause", playing.actionStrip!!.actions[0].title.toString())
@@ -48,9 +52,9 @@ class CarLyricsScreenTest {
         assertEquals(1, player.pauses)
         val paused = screen.onGetTemplate() as MapWithContentTemplate
         assertEquals("Play", paused.actionStrip!!.actions[0].title.toString())
-        paused.actionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
-        assertTrue(SavedVideos(context).contains(videos.first().id))
         paused.actionStrip!!.actions[2].onClickDelegate!!.sendClick(done)
+        assertTrue(SavedVideos(context).contains(videos.first().id))
+        paused.actionStrip!!.actions[3].onClickDelegate!!.sendClick(done)
         assertEquals(1, player.hides)
         val recent = screen.onGetTemplate() as ListTemplate
         recent.header!!.endHeaderActions.single().onClickDelegate!!.sendClick(done)
@@ -119,6 +123,19 @@ class CarLyricsScreenTest {
         browse.actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
         val search = screen.onGetTemplate() as androidx.car.app.model.SearchTemplate
         assertEquals("Song, artist, album, or genre", search.searchHint)
+    }
+
+    @Test fun queueAndPlaylistActionsPersistTheCurrentSong() {
+        val context = TestCarContext.createCarContext(app)
+        val player = FakePlayer()
+        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
+        val row = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
+        row.onClickDelegate!!.sendClick(done)
+        val playerTemplate = screen.onGetTemplate() as MapWithContentTemplate
+        playerTemplate.actionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
+        playerTemplate.actionStrip!!.actions[2].onClickDelegate!!.sendClick(done)
+        assertEquals(videos.first(), QueueStore(context).all().single())
+        assertEquals(videos.first(), PlaylistStore(context).all().first().videos.single())
     }
 
     private class FakeCatalog(override val videos: List<KaraokeVideo>) : VideoCatalog {

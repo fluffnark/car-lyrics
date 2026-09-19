@@ -34,7 +34,7 @@ class CarLyricsScreen(
     private val saved: SavedVideos = SavedVideos(context),
 ) : Screen(context), DefaultLifecycleObserver {
     private enum class Source { RECENT, SAVED }
-    private enum class Mode { BROWSE, SEARCH, COLLECTIONS, PLAYER }
+    private enum class Mode { BROWSE, SEARCH, COLLECTIONS, QUEUE, PLAYLISTS, PLAYLIST, PLAYER }
     private var source = Source.RECENT
     private var mode = Mode.BROWSE
     private var page = 0
@@ -42,6 +42,9 @@ class CarLyricsScreen(
     private var selected = -1
     private var searchQuery = ""
     private var activeCollection: KaraokeCollection? = null
+    private val playlists = PlaylistStore(context)
+    private val queueStore = QueueStore(context)
+    private var activePlaylist: KaraokePlaylist? = null
     private var playback = PlaybackStatus.IDLE
     private var moving = false
     private var speedRegistered = false
@@ -95,6 +98,9 @@ class CarLyricsScreen(
         Mode.BROWSE -> browseTemplate()
         Mode.SEARCH -> searchTemplate()
         Mode.COLLECTIONS -> collectionsTemplate()
+        Mode.QUEUE -> queueTemplate()
+        Mode.PLAYLISTS -> playlistsTemplate()
+        Mode.PLAYLIST -> playlistTemplate()
         Mode.PLAYER -> playerTemplate()
     }
 
@@ -114,6 +120,12 @@ class CarLyricsScreen(
             val maxPage = (videos.size - 1) / PAGE_SIZE
             page = page.coerceIn(0, maxPage)
             if (page == 0 && activeCollection == null && source == Source.RECENT) {
+                list.addItem(Row.Builder().setTitle("Queue • ${queueStore.all().size} songs")
+                    .addText("Build a one-drive karaoke set")
+                    .setOnClickListener { mode = Mode.QUEUE; back.isEnabled = true; invalidate() }.build())
+                list.addItem(Row.Builder().setTitle("Playlists")
+                    .addText("My mix, warm-up, and duets")
+                    .setOnClickListener { mode = Mode.PLAYLISTS; back.isEnabled = true; invalidate() }.build())
                 list.addItem(Row.Builder().setTitle("Genres & albums")
                     .addText("Browse curated Sing King collections")
                     .setOnClickListener { mode = Mode.COLLECTIONS; back.isEnabled = true; page = 0; invalidate() }.build())
@@ -187,6 +199,38 @@ class CarLyricsScreen(
             .setSingleList(list.build()).build()
     }
 
+    private fun queueTemplate(): Template {
+        val items = queueStore.all()
+        val list = ItemList.Builder().setNoItemsMessage("Add songs from the player with Queue")
+        items.forEach { video ->
+            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("Queued")
+                .setOnClickListener(ParkedOnlyOnClickListener.create { select(items, items.indexOf(video)) }).build())
+        }
+        return ListTemplate.Builder().setHeader(Header.Builder().setTitle("Up next • ${items.size}").setStartHeaderAction(Action.APP_ICON).build())
+            .setSingleList(list.build()).build()
+    }
+
+    private fun playlistsTemplate(): Template {
+        val list = ItemList.Builder()
+        playlists.all().forEach { playlist ->
+            list.addItem(Row.Builder().setTitle(playlist.name).addText("${playlist.videos.size} karaoke songs")
+                .setOnClickListener { activePlaylist = playlist; mode = Mode.PLAYLIST; back.isEnabled = true; invalidate() }.build())
+        }
+        return ListTemplate.Builder().setHeader(Header.Builder().setTitle("Your playlists").setStartHeaderAction(Action.APP_ICON).build())
+            .setSingleList(list.build()).build()
+    }
+
+    private fun playlistTemplate(): Template {
+        val playlist = activePlaylist ?: return playlistsTemplate()
+        val list = ItemList.Builder().setNoItemsMessage("Add songs from the player with Add to mix")
+        playlist.videos.forEach { video ->
+            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("${playlist.name} • karaoke")
+                .setOnClickListener(ParkedOnlyOnClickListener.create { select(playlist.videos, playlist.videos.indexOf(video)) }).build())
+        }
+        return ListTemplate.Builder().setHeader(Header.Builder().setTitle(playlist.name).setStartHeaderAction(Action.APP_ICON).build())
+            .setSingleList(list.build()).build()
+    }
+
     private fun playerTemplate(): Template {
         val current = queue.getOrNull(selected)
         val state = when (playback) {
@@ -216,14 +260,21 @@ class CarLyricsScreen(
                 }).build()
         }
         val savedAction = Action.Builder()
-            .setTitle(if (current != null && saved.contains(current.id)) "Saved" else "Save")
+            .setTitle(if (current != null && playlists.contains("My karaoke mix", current.id)) "In mix" else "Add to mix")
             .setIcon(icon(R.drawable.ic_saved))
             .setOnClickListener {
-                current?.let { saved.toggle(it) }
+                current?.let { video ->
+                    saved.toggle(video)
+                    playlists.toggle("My karaoke mix", video)
+                }
                 invalidate()
             }.build()
+        val queueAction = Action.Builder()
+            .setTitle(if (current != null && queueStore.all().any { it.id == current.id }) "Queued" else "Queue")
+            .setOnClickListener { current?.let { queueStore.toggle(it) }; invalidate() }.build()
         val strip = ActionStrip.Builder()
             .addAction(playbackAction)
+            .addAction(queueAction)
             .addAction(savedAction)
             .addAction(Action.Builder().setTitle("Browse").setIcon(icon(R.drawable.ic_browse))
                 .setOnClickListener { browse() }.build()).build()
