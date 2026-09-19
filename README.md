@@ -1,8 +1,8 @@
 # Car Lyrics
 
-An Android Auto car-screen karaoke experiment for a 2021 Mazda CX-5 and a connected Pixel 7a. The first milestone is a local prototype that follows Spotify playback, draws time stamped lyrics on the car display, and works with the Mazda Commander knob. Spotify Premium is available for development.
+An Android Auto car-screen karaoke experiment for a 2021 Mazda CX-5 and a connected Pixel 7a. The app will let the user choose albums and playlists, create lyric-ready mixes, and play only selected tracks with matched timed lyrics through Spotify Premium. Lyrics appear on the car display and all car controls use the Mazda Commander knob.
 
-See [the implementation plan](docs/PLAN.md) for scope, evidence, milestones, and acceptance checks, and [open source options](docs/OPEN_SOURCE_OPTIONS.md) for existing apps and lyric catalogs.
+See [the product workflow](docs/PRODUCT_WORKFLOW.md), [implementation plan](docs/PLAN.md), and [open source options](docs/OPEN_SOURCE_OPTIONS.md).
 
 ## Current status
 
