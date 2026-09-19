@@ -8,7 +8,7 @@
 - App type: App
 - Price: Free
 - Category: Music & Audio
-- Version: `0.3.1` / version code `4`
+- Version: `0.3.2` / version code `5`
 - Release artifact: `../app/build/outputs/bundle/release/app-release.aab`
 
 ## Store listing
@@ -27,7 +27,7 @@ The phone stays in your pocket during the car flow. Video playback requires an i
 
 ### Release notes
 
-Added car-friendly search, voice search support, curated genre and album collections, persistent karaoke queue, and local playlists. This build also includes the development testing mode for diagnosing Mazda car controls.
+Added car-friendly search, voice search support, curated genre and album collections, persistent karaoke queue, and local playlists. This build also requests media audio focus for YouTube playback and includes the development testing mode for diagnosing Mazda car controls.
 
 ## Tester notes
 

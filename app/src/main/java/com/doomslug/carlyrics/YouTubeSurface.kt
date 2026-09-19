@@ -2,6 +2,10 @@ package com.doomslug.carlyrics
 
 import android.app.Presentation
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
 import android.graphics.Color
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
@@ -36,6 +40,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
     @Volatile private var closed = false
     private var generation = 0
     private var status = PlaybackStatus.IDLE
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     override fun onSurfaceAvailable(container: SurfaceContainer) {
         if (closed) return
@@ -51,6 +56,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
             height = h
             if (surface?.isValid != true || w <= 0 || h <= 0) { update(PlaybackStatus.ERROR); return@post }
             runCatching {
+                requestAudioFocus()
                 display = context.getSystemService(DisplayManager::class.java)
                     .createVirtualDisplay("Car Lyrics player", w, h, dpi, surface, 0)
                 presentation = Presentation(context, display!!.display)
@@ -119,9 +125,38 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
         desiredPlaying = false
         generation++
         webView?.loadUrl("about:blank")
+        abandonAudioFocus()
         update(PlaybackStatus.IDLE)
     } }
     override fun close() { closed = true; main.post { generation++; releaseDisplay(); onStatus = null } }
+
+    private fun requestAudioFocus() {
+        val audio = context.getSystemService(AudioManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= 26) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build())
+                .setWillPauseWhenDucked(false)
+                .build()
+            audioFocusRequest = request
+            audio.requestAudioFocus(request)
+        } else {
+            @Suppress("DEPRECATION")
+            audio.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val audio = context.getSystemService(AudioManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= 26) audioFocusRequest?.let { audio.abandonAudioFocusRequest(it) }
+        else {
+            @Suppress("DEPRECATION")
+            audio.abandonAudioFocus(null)
+        }
+        audioFocusRequest = null
+    }
 
     private fun load(value: KaraokeVideo) {
         if (!authorized || !KaraokeVideo.ID.matches(value.id)) return
@@ -134,7 +169,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
               width:'100%',height:'100%',videoId:'${value.id}',
-              playerVars:{playsinline:1,controls:1,autoplay:0,origin:'https://com.doomslug.carlyrics'},
+              playerVars:{playsinline:1,controls:1,autoplay:0,enablejsapi:1,origin:'https://com.doomslug.carlyrics'},
               events:{
                 onReady:function(e){console.log('CAR_LYRICS_READY:${value.id}:1');},
                 onStateChange:function(e){console.log('CAR_LYRICS_STATE:${value.id}:'+e.data);},
@@ -181,6 +216,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
     }
 
     private fun releaseDisplay() {
+        abandonAudioFocus()
         webView?.loadUrl("about:blank")
         webView?.let { root?.removeView(it) }
         webView?.destroy()
