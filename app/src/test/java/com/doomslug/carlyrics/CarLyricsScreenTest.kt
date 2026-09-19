@@ -33,7 +33,7 @@ class CarLyricsScreenTest {
         val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
         val browse = screen.onGetTemplate() as ListTemplate
         assertEquals("Sing King • Recent", browse.header!!.title.toString())
-        val first = browse.singleList!!.items.first() as Row
+        val first = browse.singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
         assertNotNull(first.image)
         assertTrue(first.onClickDelegate!!.isParkedOnly)
         first.onClickDelegate!!.sendClick(done)
@@ -84,7 +84,7 @@ class CarLyricsScreenTest {
         val context = TestCarContext.createCarContext(app)
         val player = FakePlayer()
         val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
-        val first = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first() as Row
+        val first = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
         first.onClickDelegate!!.sendClick(done)
         val actions = ((screen.onGetTemplate() as MapWithContentTemplate).contentTemplate as androidx.car.app.model.PaneTemplate)
             .pane!!.actions
@@ -102,13 +102,23 @@ class CarLyricsScreenTest {
         val lifecycle = screen.lifecycle as LifecycleRegistry
         lifecycle.currentState = Lifecycle.State.CREATED
         lifecycle.currentState = Lifecycle.State.STARTED
-        val row = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first() as Row
+        val row = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
         row.onClickDelegate!!.sendClick(done)
         assertTrue(screen.onGetTemplate() is MapWithContentTemplate)
         context.onBackPressedDispatcher.onBackPressed()
         assertTrue(screen.onGetTemplate() is ListTemplate)
         assertEquals(1, player.hides)
         lifecycle.currentState = Lifecycle.State.DESTROYED
+    }
+
+    @Test fun browseExposesSearchAndCuratedCollections() {
+        val context = TestCarContext.createCarContext(app)
+        val screen = CarLyricsScreen(context, FakeCatalog(videos), FakePlayer(), SavedVideos(context))
+        val browse = screen.onGetTemplate() as ListTemplate
+        assertEquals("Search", browse.actionStrip!!.actions.single().title.toString())
+        browse.actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
+        val search = screen.onGetTemplate() as androidx.car.app.model.SearchTemplate
+        assertEquals("Song, artist, album, or genre", search.searchHint)
     }
 
     private class FakeCatalog(override val videos: List<KaraokeVideo>) : VideoCatalog {

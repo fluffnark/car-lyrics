@@ -18,6 +18,7 @@ import androidx.car.app.model.Pane
 import androidx.car.app.model.PaneTemplate
 import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Row
+import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.MapWithContentTemplate
 import androidx.core.graphics.drawable.IconCompat
@@ -33,12 +34,14 @@ class CarLyricsScreen(
     private val saved: SavedVideos = SavedVideos(context),
 ) : Screen(context), DefaultLifecycleObserver {
     private enum class Source { RECENT, SAVED }
-    private enum class Mode { BROWSE, PLAYER }
+    private enum class Mode { BROWSE, SEARCH, COLLECTIONS, PLAYER }
     private var source = Source.RECENT
     private var mode = Mode.BROWSE
     private var page = 0
     private var queue = emptyList<KaraokeVideo>()
     private var selected = -1
+    private var searchQuery = ""
+    private var activeCollection: KaraokeCollection? = null
     private var playback = PlaybackStatus.IDLE
     private var moving = false
     private var speedRegistered = false
@@ -88,7 +91,12 @@ class CarLyricsScreen(
 
     override fun onDestroy(owner: LifecycleOwner) { player.close() }
 
-    override fun onGetTemplate(): Template = if (mode == Mode.BROWSE) browseTemplate() else playerTemplate()
+    override fun onGetTemplate(): Template = when (mode) {
+        Mode.BROWSE -> browseTemplate()
+        Mode.SEARCH -> searchTemplate()
+        Mode.COLLECTIONS -> collectionsTemplate()
+        Mode.PLAYER -> playerTemplate()
+    }
 
     private fun browseTemplate(): Template {
         val videos = currentVideos()
@@ -105,6 +113,11 @@ class CarLyricsScreen(
         } else {
             val maxPage = (videos.size - 1) / PAGE_SIZE
             page = page.coerceIn(0, maxPage)
+            if (page == 0 && activeCollection == null && source == Source.RECENT) {
+                list.addItem(Row.Builder().setTitle("Genres & albums")
+                    .addText("Browse curated Sing King collections")
+                    .setOnClickListener { mode = Mode.COLLECTIONS; back.isEnabled = true; page = 0; invalidate() }.build())
+            }
             if (page > 0) list.addItem(Row.Builder().setTitle("Previous page")
                 .setOnClickListener { page--; invalidate() }.build())
             val visible = videos.drop(page * PAGE_SIZE).take(PAGE_SIZE)
@@ -135,11 +148,43 @@ class CarLyricsScreen(
                 invalidate()
             }.build()
         val header = Header.Builder()
-            .setTitle(if (source == Source.RECENT) "Sing King • Recent" else "Saved karaoke songs")
+            .setTitle(activeCollection?.title ?: if (source == Source.RECENT) "Sing King • Recent" else "Saved karaoke songs")
             .setStartHeaderAction(Action.APP_ICON)
             .addEndHeaderAction(switch)
             .build()
-        return ListTemplate.Builder().setHeader(header).setSingleList(list.build()).build()
+        val actions = ActionStrip.Builder()
+            .addAction(Action.Builder().setTitle("Search").setOnClickListener { openSearch() }.build())
+            .build()
+        return ListTemplate.Builder().setHeader(header).setSingleList(list.build()).setActionStrip(actions).build()
+    }
+
+    private fun searchTemplate(): Template {
+        val matches = searchResults(searchQuery)
+        val list = ItemList.Builder().setNoItemsMessage(if (searchQuery.isBlank()) "Type or say a song, artist, album, or genre" else "No matching karaoke videos")
+        matches.take(30).forEach { video ->
+            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("Sing King • karaoke")
+                .setOnClickListener(ParkedOnlyOnClickListener.create { select(matches, matches.indexOf(video)) }).build())
+        }
+        return SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
+            override fun onSearchTextChanged(searchText: String) { searchQuery = searchText; invalidate() }
+            override fun onSearchSubmitted(searchText: String) { searchQuery = searchText; invalidate() }
+        }).setSearchHint("Song, artist, album, or genre")
+            .setInitialSearchText(searchQuery)
+            .setItemList(list.build())
+            .setHeaderAction(Action.APP_ICON)
+            .build()
+    }
+
+    private fun collectionsTemplate(): Template {
+        val list = ItemList.Builder()
+        SingKingCatalog.collections.forEach { collection ->
+            list.addItem(Row.Builder().setTitle(collection.title)
+                .addText("${collection.kind.replaceFirstChar { it.uppercase() }} • ${collection.ids.size} songs")
+                .setOnClickListener { activeCollection = collection; mode = Mode.BROWSE; page = 0; invalidate() }.build())
+        }
+        list.addItem(Row.Builder().setTitle("Back to recent").setOnClickListener { activeCollection = null; mode = Mode.BROWSE; invalidate() }.build())
+        return ListTemplate.Builder().setHeader(Header.Builder().setTitle("Genres & albums").setStartHeaderAction(Action.APP_ICON).build())
+            .setSingleList(list.build()).build()
     }
 
     private fun playerTemplate(): Template {
@@ -188,7 +233,21 @@ class CarLyricsScreen(
     }
 
     private fun icon(resource: Int) = CarIcon.Builder(IconCompat.createWithResource(carContext, resource)).build()
-    private fun currentVideos(): List<KaraokeVideo> = if (source == Source.RECENT) catalog.videos else saved.all()
+    private fun currentVideos(): List<KaraokeVideo> {
+        if (activeCollection != null) {
+            val byId = SingKingCatalog.library.associateBy { it.id }
+            return activeCollection!!.ids.mapNotNull { byId[it] }
+        }
+        return if (source == Source.RECENT) catalog.videos else saved.all()
+    }
+
+    private fun searchResults(query: String): List<KaraokeVideo> {
+        if (query.isBlank()) return SingKingCatalog.library.take(30)
+        val words = query.trim().lowercase().split(Regex("\\s+")).filter { it.length > 1 }
+        return SingKingCatalog.library.filter { video -> words.all { video.title.lowercase().contains(it) } }
+    }
+
+    private fun openSearch() { searchQuery = ""; mode = Mode.SEARCH; back.isEnabled = true; invalidate() }
 
     private fun select(videos: List<KaraokeVideo>, index: Int) {
         val video = videos.getOrNull(index) ?: return
@@ -212,6 +271,7 @@ class CarLyricsScreen(
     private fun browse() {
         player.hide()
         mode = Mode.BROWSE
+        searchQuery = ""
         back.isEnabled = false
         playback = PlaybackStatus.IDLE
         invalidate()

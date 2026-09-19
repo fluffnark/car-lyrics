@@ -17,6 +17,8 @@ data class KaraokeVideo(val id: String, val title: String) {
     companion object { val ID = Regex("[A-Za-z0-9_-]{11}") }
 }
 
+data class KaraokeCollection(val kind: String, val title: String, val ids: List<String>)
+
 interface VideoCatalog {
     val videos: List<KaraokeVideo>
     val loading: Boolean
@@ -68,6 +70,10 @@ object SingKingCatalog : VideoCatalog {
         private set
     override var error: String? = null
         private set
+    var library: List<KaraokeVideo> = emptyList()
+        private set
+    var collections: List<KaraokeCollection> = emptyList()
+        private set
     var lastUpdatedAt: Long = 0L
         private set
 
@@ -82,6 +88,24 @@ object SingKingCatalog : VideoCatalog {
             val id = item.optString("id")
             val title = item.optString("title")
             if (KaraokeVideo.ID.matches(id) && title.isNotBlank()) KaraokeVideo(id, title) else null
+        }
+        runCatching {
+            val root = JSONObject(context!!.assets.open("sing_king_library.json").bufferedReader().use { it.readText() })
+            val libraryJson = root.optJSONArray("songs") ?: JSONArray()
+            library = (0 until libraryJson.length()).mapNotNull { index ->
+                val item = libraryJson.optJSONObject(index) ?: return@mapNotNull null
+                val id = item.optString("id")
+                val title = item.optString("title")
+                if (KaraokeVideo.ID.matches(id) && title.isNotBlank()) KaraokeVideo(id, title) else null
+            }
+            val byId = library.associateBy { it.id }
+            val groups = root.optJSONArray("collections") ?: JSONArray()
+            collections = (0 until groups.length()).mapNotNull { index ->
+                val group = groups.optJSONObject(index) ?: return@mapNotNull null
+                val groupIds = group.optJSONArray("ids") ?: JSONArray()
+                val ids = (0 until groupIds.length()).mapNotNull { i -> byId[groupIds.optString(i)]?.id }
+                KaraokeCollection(group.optString("kind"), group.optString("title"), ids)
+            }
         }
     }
 
