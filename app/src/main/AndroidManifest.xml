@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
     <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
     <application android:allowBackup="false" android:appCategory="maps" android:label="Car Lyrics" android:icon="@drawable/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar">
@@ -10,6 +12,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".MorpheProjectionService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <service android:name=".CarLyricsService" android:exported="true" android:label="Car Lyrics" android:icon="@drawable/ic_launcher">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />

@@ -38,7 +38,9 @@ Since you have Play Console access, upload `app/build/outputs/bundle/release/app
 
 The app's POI surface is an experimental private route: [Android documents virtual displays on car surfaces for map-capable apps](https://developer.android.com/training/cars/apps/library/draw-maps), while [video apps on Android Auto are still early access](https://developer.android.com/training/cars/whats-new). A host could reject this use of the POI category. This development build does not read car speed or gate browsing and playback on parking.
 
-The previous screen-sharing APK and Spotify/lyric-library design are superseded. Their research remains in [docs/PLAN.md](docs/PLAN.md), [docs/PRODUCT_WORKFLOW.md](docs/PRODUCT_WORKFLOW.md), and [docs/OPEN_SOURCE_OPTIONS.md](docs/OPEN_SOURCE_OPTIONS.md).
+The current release also contains an opt-in **Experimental Morphe mirror**. From the phone companion, tap Enable Morphe screen share and select Morphe in Android's screen-share picker. The car player then launches the selected URL in Morphe and sends its captured display to the existing car video surface. This is a development experiment: Android shows a persistent capture notification, the phone must remain unlocked, and Mazda/Android Auto may reject a projected screen surface. The normal iframe player remains the default.
+
+The earlier Spotify/lyric-library design remains superseded. Its research is in [docs/PLAN.md](docs/PLAN.md), [docs/PRODUCT_WORKFLOW.md](docs/PRODUCT_WORKFLOW.md), and [docs/OPEN_SOURCE_OPTIONS.md](docs/OPEN_SOURCE_OPTIONS.md).
 
 ## References
 

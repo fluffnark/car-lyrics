@@ -1,6 +1,7 @@
 package com.doomslug.carlyrics
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -18,6 +19,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.media.projection.MediaProjectionManager
 
 /** A companion status screen. The car flow requires no phone interaction. */
 class MainActivity : Activity() {
@@ -34,6 +36,7 @@ class MainActivity : Activity() {
     private val searchHandler = Handler(Looper.getMainLooper())
     private var searchGeneration = 0
     private var remoteResults = emptyList<KaraokeVideo>()
+    private lateinit var morpheStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +78,23 @@ class MainActivity : Activity() {
         card.addView(space(8))
         card.addView(text("Browse, play, save, and skip from the car screen.", 15f, muted))
         body.addView(card)
+        body.addView(space(14))
+        val morpheCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(18))
+            background = panel(Color.rgb(35, 42, 61), 20)
+        }
+        morpheCard.addView(text("EXPERIMENTAL MORPHE MIRROR", 12f, gold, true).apply { letterSpacing = 0.10f })
+        morpheCard.addView(space(8))
+        morpheStatus = text("Approve screen share, select Morphe in the picker, then use the Mazda screen and knob.", 14f, muted)
+        morpheCard.addView(morpheStatus)
+        morpheCard.addView(space(10))
+        morpheCard.addView(Button(this).apply {
+            text = "Enable Morphe screen share"
+            isAllCaps = false
+            setOnClickListener { requestMorpheCapture() }
+        })
+        body.addView(morpheCard)
         body.addView(space(30))
         body.addView(text("PASSENGER QUEUE", 13f, mint, true).apply { letterSpacing = 0.14f })
         body.addView(space(8))
@@ -126,6 +146,21 @@ class MainActivity : Activity() {
         renderPhoneResults("")
         updateCatalog()
         if (SingKingCatalog.videos.isEmpty() || SingKingCatalog.isStale()) SingKingCatalog.refresh { updateCatalog() }
+    }
+
+    private fun requestMorpheCapture() {
+        val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_MORPHE_CAPTURE)
+    }
+
+    @Deprecated("Activity result API kept small for the development prototype")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_MORPHE_CAPTURE || resultCode != RESULT_OK || data == null) return
+        MorpheCaptureGrant.resultCode = resultCode
+        MorpheCaptureGrant.data = data
+        getSharedPreferences("car_lyrics", MODE_PRIVATE).edit().putBoolean("morphe_mirror_enabled", true).apply()
+        if (::morpheStatus.isInitialized) morpheStatus.text = "Enabled. Reopen Car Lyrics on the Mazda, then choose a song."
     }
 
     private fun renderPhoneResults(query: String) {
@@ -202,4 +237,6 @@ class MainActivity : Activity() {
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     private fun panel(color: Int, radius: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radius).toFloat() }
     private fun dp(value: Int) = (resources.displayMetrics.density * value).toInt()
+
+    private companion object { const val REQUEST_MORPHE_CAPTURE = 4107 }
 }

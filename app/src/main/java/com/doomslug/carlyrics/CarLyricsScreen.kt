@@ -25,7 +25,8 @@ import androidx.lifecycle.LifecycleOwner
 class CarLyricsScreen(
     context: CarContext,
     private val catalog: VideoCatalog = SingKingCatalog,
-    private val player: VideoPlayer = YouTubeSurface(context),
+    private val player: VideoPlayer = if (context.getSharedPreferences("car_lyrics", 0)
+        .getBoolean("morphe_mirror_enabled", false)) MorpheScreenShare(context) else YouTubeSurface(context),
     private val saved: SavedVideos = SavedVideos(context),
 ) : Screen(context), DefaultLifecycleObserver {
     private enum class Source { RECENT, SAVED }

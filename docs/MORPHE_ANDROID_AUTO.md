@@ -38,6 +38,8 @@ The result would also need a distinct package/signature and would not be a norma
 
 MediaProjection or an external screen-capture path could capture Morphe on the phone, but Android Auto does not provide a general third-party screen-share channel to put those pixels on a Mazda head unit. A capture stream would still need a supported Android Auto parked/video surface, repeated consent, and a custom transport. It would not automatically provide reliable Mazda knob control. It is unsuitable for the “phone stays in pocket” flow.
 
+Car Lyrics now contains an opt-in development experiment for this route. It requests MediaProjection consent on the phone, asks the user to select Morphe in Android's single-app picker, starts a foreground capture service, and feeds the captured frames into the existing `SurfaceCallback` virtual display. This is a hypothesis test for the Pixel/Mazda combination, not a claim that Android Auto will accept arbitrary mirrored pixels. The capture is intentionally off by default.
+
 ## Recommended experiment
 
 1. Install Morphe YouTube and Morphe MicroG on the Pixel without sharing credentials with the development environment.
