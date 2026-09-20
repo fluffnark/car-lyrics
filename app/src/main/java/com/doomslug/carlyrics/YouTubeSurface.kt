@@ -44,6 +44,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
     private var generation = 0
     private var status = PlaybackStatus.IDLE
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var watchPageFallback = false
 
     override fun onSurfaceAvailable(container: SurfaceContainer) {
         if (closed) return
@@ -69,7 +70,13 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
-                    webViewClient = object : WebViewClient() {}
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, url: String) {
+                            if (watchPageFallback && authorized && desiredPlaying) {
+                                view.evaluateJavascript("document.querySelector('video')?.play();", null)
+                            }
+                        }
+                    }
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                             val line = message.message()
@@ -80,8 +87,10 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
                                 }
                                 "CAR_LYRICS_STATE" -> handlePlayerState(marker[2].toIntOrNull())
                                 "CAR_LYRICS_ERROR" -> {
+                                    val code = marker[2].toIntOrNull()
                                     Log.w("CarLyricsPlayer", "YouTube error ${marker[2]}")
-                                    update(PlaybackStatus.ERROR)
+                                    if ((code == 101 || code == 150) && !watchPageFallback) loadWatchPage(video!!)
+                                    else update(PlaybackStatus.ERROR)
                                 }
                             }
                             return true
@@ -120,15 +129,22 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
         if (webView != null) load(video)
     } }
 
-    override fun pause() { main.post { desiredPlaying = false; script("player.pauseVideo()") } }
+    override fun pause() { main.post {
+        desiredPlaying = false
+        if (watchPageFallback) webView?.evaluateJavascript("document.querySelector('video')?.pause();", null)
+        else script("player.pauseVideo()")
+    } }
     override fun resume() { main.post {
         if (!authorized) return@post
         desiredPlaying = true
-        if (status == PlaybackStatus.ERROR) video?.let(::load) else script("player.playVideo()")
+        if (status == PlaybackStatus.ERROR) video?.let(::load)
+        else if (watchPageFallback) webView?.evaluateJavascript("document.querySelector('video')?.play();", null)
+        else script("player.playVideo()")
     } }
     override fun hide() { main.post {
         authorized = false
         desiredPlaying = false
+        watchPageFallback = false
         generation++
         webView?.loadUrl("about:blank")
         abandonAudioFocus()
@@ -166,6 +182,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
 
     private fun load(value: KaraokeVideo) {
         if (!authorized || !KaraokeVideo.ID.matches(value.id)) return
+        watchPageFallback = false
         val ticket = ++generation
         update(PlaybackStatus.LOADING)
         val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta name="referrer" content="strict-origin-when-cross-origin"></head>
@@ -186,6 +203,18 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
           </script><style>html,body,#player{width:100%;height:100%;}</style></body></html>"""
         // A real HTTPS base URL supplies the Referer required by YouTube's embedded player.
         webView?.loadDataWithBaseURL("$WEB_ORIGIN/", html, "text/html", "UTF-8", null)
+        main.postDelayed({
+            if (ticket == generation && authorized && status == PlaybackStatus.LOADING) update(PlaybackStatus.ERROR)
+        }, 20_000L)
+    }
+
+    /** Error 101/150 means the owner disallows embedding; try YouTube's own watch page. */
+    private fun loadWatchPage(value: KaraokeVideo) {
+        if (!authorized || !KaraokeVideo.ID.matches(value.id)) return
+        watchPageFallback = true
+        val ticket = ++generation
+        update(PlaybackStatus.LOADING)
+        webView?.loadUrl("https://www.youtube.com/watch?v=${value.id}&autoplay=1")
         main.postDelayed({
             if (ticket == generation && authorized && status == PlaybackStatus.LOADING) update(PlaybackStatus.ERROR)
         }, 20_000L)
