@@ -54,6 +54,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
         val dpi = container.dpi
         main.post {
             if (closed) return@post
+            Log.i("CarLyricsPlayer", "surface available ${w}x${h} dpi=$dpi valid=${surface?.isValid}")
             releaseDisplay()
             hostSurface = surface
             width = w
@@ -62,7 +63,17 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
             runCatching {
                 requestAudioFocus()
                 display = context.getSystemService(DisplayManager::class.java)
-                    .createVirtualDisplay("Car Lyrics player", w, h, dpi, surface, 0)
+                    // Presentation is required for a Presentation/WebView to render
+                    // into a virtual display instead of leaving the host surface blank.
+                    .createVirtualDisplay(
+                        "Car Lyrics player",
+                        w,
+                        h,
+                        dpi,
+                        surface,
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
+                            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
+                    )
                 presentation = Presentation(context, display!!.display)
                 root = FrameLayout(presentation!!.context).apply { setBackgroundColor(Color.BLACK) }
                 webView = WebView(presentation!!.context).apply {
@@ -72,6 +83,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
                     settings.mediaPlaybackRequiresUserGesture = false
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String) {
+                            Log.i("CarLyricsPlayer", "page finished url=$url hardware=${view.isHardwareAccelerated}")
                             if (watchPageFallback && authorized && desiredPlaying) {
                                 view.evaluateJavascript("document.querySelector('video')?.play();", null)
                                 update(PlaybackStatus.PLAYING)
@@ -81,6 +93,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                             val line = message.message()
+                            if (line.startsWith("CAR_LYRICS")) Log.i("CarLyricsPlayer", line)
                             val marker = line.split(':', limit = 3)
                             if (marker.size == 3 && authorized && marker[1] == video?.id) when (marker[0]) {
                                 "CAR_LYRICS_READY" -> {

@@ -20,13 +20,16 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import android.util.Log
 
 /** Host-rendered rows and actions support the Mazda Commander knob. */
 class CarLyricsScreen(
     context: CarContext,
     private val catalog: VideoCatalog = SingKingCatalog,
-    private val player: VideoPlayer = if (context.getSharedPreferences("car_lyrics", 0)
-        .getBoolean("morphe_mirror_enabled", false)) MorpheScreenShare(context) else YouTubeSurface(context),
+    private val player: VideoPlayer = if (
+        context.getSharedPreferences("car_lyrics", 0).getBoolean("morphe_mirror_enabled", false) &&
+        MorpheCaptureGrant.isGranted
+    ) MorpheScreenShare(context) else YouTubeSurface(context),
     private val saved: SavedVideos = SavedVideos(context),
 ) : Screen(context), DefaultLifecycleObserver {
     private enum class Source { RECENT, SAVED }
@@ -54,7 +57,8 @@ class CarLyricsScreen(
     }
 
     override fun onStart(owner: LifecycleOwner) {
-        carContext.getCarService(AppManager::class.java).setSurfaceCallback(player)
+        Log.i("CarLyricsPlayer", "screen start mode=$mode player=${player::class.java.simpleName}")
+        registerSurface()
         if (catalog === SingKingCatalog) {
             SingKingCatalog.initialize(carContext)
             if (catalog.videos.isEmpty() || SingKingCatalog.isStale()) refresh()
@@ -70,7 +74,11 @@ class CarLyricsScreen(
 
     override fun onDestroy(owner: LifecycleOwner) { player.close() }
 
-    override fun onGetTemplate(): Template = when (mode) {
+    override fun onGetTemplate(): Template {
+        // Some hosts create the MapWithContent surface after onStart. Re-registering
+        // here makes the callback resilient to that ordering and to host reconnects.
+        registerSurface()
+        return when (mode) {
         Mode.BROWSE -> browseTemplate()
         Mode.SEARCH -> searchTemplate()
         Mode.COLLECTIONS -> collectionsTemplate()
@@ -78,6 +86,12 @@ class CarLyricsScreen(
         Mode.PLAYLISTS -> playlistsTemplate()
         Mode.PLAYLIST -> playlistTemplate()
         Mode.PLAYER -> playerTemplate()
+        }
+    }
+
+    private fun registerSurface() {
+        Log.i("CarLyricsPlayer", "register surface mode=$mode")
+        carContext.getCarService(AppManager::class.java).setSurfaceCallback(player)
     }
 
     private fun browseTemplate(): Template {
