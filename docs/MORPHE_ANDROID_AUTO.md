@@ -40,6 +40,17 @@ MediaProjection or an external screen-capture path could capture Morphe on the p
 
 Car Lyrics now contains an opt-in development experiment for this route. It requests MediaProjection consent on the phone, asks the user to select Morphe in Android's single-app picker, starts a foreground capture service, and feeds the captured frames into the existing `SurfaceCallback` virtual display. This is a hypothesis test for the Pixel/Mazda combination, not a claim that Android Auto will accept arbitrary mirrored pixels. The capture is intentionally off by default.
 
+### Desktop Head Unit check
+
+The Android Auto Desktop Head Unit is installed on the development machine. With Android Auto's **Start head unit server** enabled on the Pixel and the DHU started in USB mode, Car Lyrics appeared in the launcher. The DHU accepted rotary/d-pad navigation through the recent list and opened the player template. The player action strip rendered, but the custom video surface stayed black in this emulator run; the embedded video path therefore still needs a rendering fix or a real surface test before relying on it in the Mazda. The DHU command used was:
+
+```sh
+adb -s 32021JEHN04408 forward tcp:5277 tcp:5277
+LD_LIBRARY_PATH=/tmp/dhu-libs/usr/lib:$ANDROID_HOME/extras/google/auto \
+  $ANDROID_HOME/extras/google/auto/desktop-head-unit --usb \
+  --config=$ANDROID_HOME/extras/google/auto/config/default_720p.ini
+```
+
 ## Recommended experiment
 
 1. Install Morphe YouTube and Morphe MicroG on the Pixel without sharing credentials with the development environment.
