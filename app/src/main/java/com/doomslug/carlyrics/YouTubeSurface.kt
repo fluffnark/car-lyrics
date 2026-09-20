@@ -35,7 +35,6 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
     private var presentation: Presentation? = null
     private var root: FrameLayout? = null
     private var webView: WebView? = null
-    private var area: Rect? = null
     private var width = 0
     private var height = 0
     private var video: KaraokeVideo? = null
@@ -107,8 +106,11 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
         main.post { if (hostSurface == surface) { releaseDisplay(); hostSurface = null } }
     }
 
-    override fun onVisibleAreaChanged(visibleArea: Rect) { main.post { area = Rect(visibleArea); applyArea() } }
-    override fun onStableAreaChanged(stableArea: Rect) { main.post { area = Rect(stableArea); applyArea() } }
+    // The player is a development video surface. Keep it edge-to-edge instead of
+    // shrinking it to the host's map-safe visible rectangle (which leaves the map
+    // exposed on the right side of wide Android Auto displays).
+    override fun onVisibleAreaChanged(visibleArea: Rect) { main.post { applyArea() } }
+    override fun onStableAreaChanged(stableArea: Rect) { main.post { applyArea() } }
 
     override fun select(video: KaraokeVideo) { main.post {
         this.video = video
@@ -210,13 +212,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
 
     private fun applyArea() {
         val view = webView ?: return
-        val region = area?.takeIf { !it.isEmpty } ?: Rect(0, 0, width, height)
-        val left = region.left.coerceIn(0, width)
-        val top = region.top.coerceIn(0, height)
-        val right = region.right.coerceIn(left, width)
-        val bottom = region.bottom.coerceIn(top, height)
-        view.layoutParams = FrameLayout.LayoutParams((right - left).coerceAtLeast(1), (bottom - top).coerceAtLeast(1), Gravity.TOP or Gravity.LEFT)
-            .apply { leftMargin = left; topMargin = top }
+        view.layoutParams = FrameLayout.LayoutParams(width.coerceAtLeast(1), height.coerceAtLeast(1), Gravity.TOP or Gravity.LEFT)
     }
 
     private fun releaseDisplay() {

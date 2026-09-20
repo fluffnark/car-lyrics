@@ -8,6 +8,10 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.text.Editable
+import android.text.TextWatcher
+import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -21,6 +25,10 @@ class MainActivity : Activity() {
     private val gold = Color.rgb(245, 206, 130)
     private lateinit var catalogStatus: TextView
     private lateinit var preview: LinearLayout
+    private lateinit var phoneResults: LinearLayout
+    private lateinit var queueStatus: TextView
+    private val queueStore by lazy { QueueStore(this) }
+    private val playlistStore by lazy { PlaylistStore(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,6 +71,31 @@ class MainActivity : Activity() {
         card.addView(text("Browse, play, save, and skip from the car screen.", 15f, muted))
         body.addView(card)
         body.addView(space(30))
+        body.addView(text("PASSENGER QUEUE", 13f, mint, true).apply { letterSpacing = 0.14f })
+        body.addView(space(8))
+        body.addView(text("Search and add songs from the phone while the car screen stays focused on playback.", 15f, muted))
+        body.addView(space(10))
+        val search = EditText(this).apply {
+            hint = "Search song, artist, album, or genre"
+            setSingleLine(true)
+            setTextColor(ink)
+            setHintTextColor(muted)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = panel(Color.rgb(28, 44, 57), 14)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { renderPhoneResults(s?.toString().orEmpty()) }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        body.addView(search, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+        body.addView(space(8))
+        queueStatus = text("Queue: ${queueStore.all().size} songs • My karaoke mix: ${playlistStore.all().firstOrNull { it.name == "My karaoke mix" }?.videos?.size ?: 0}", 14f, gold)
+        body.addView(queueStatus)
+        body.addView(space(8))
+        phoneResults = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(phoneResults)
+        body.addView(space(24))
         body.addView(text("SING KING • RECENT", 13f, gold, true).apply { letterSpacing = 0.12f })
         body.addView(space(10))
         catalogStatus = text("Checking the channel…", 15f, muted)
@@ -74,8 +107,47 @@ class MainActivity : Activity() {
         setContentView(scroll)
 
         SingKingCatalog.initialize(this)
+        renderPhoneResults("")
         updateCatalog()
         if (SingKingCatalog.videos.isEmpty() || SingKingCatalog.isStale()) SingKingCatalog.refresh { updateCatalog() }
+    }
+
+    private fun renderPhoneResults(query: String) {
+        if (!::phoneResults.isInitialized) return
+        phoneResults.removeAllViews()
+        val normalized = query.trim().lowercase()
+        val source = if (normalized.isBlank()) SingKingCatalog.library.take(8) else
+            SingKingCatalog.library.filter { it.title.lowercase().contains(normalized) }.take(20)
+        if (source.isEmpty()) {
+            phoneResults.addView(text("No matching karaoke videos yet.", 14f, muted))
+            return
+        }
+        source.forEach { video ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(8), dp(4), dp(8))
+                background = panel(Color.rgb(24, 37, 50), 12)
+            }
+            row.addView(text(video.title, 14f, ink), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(Button(this).apply {
+                text = if (queueStore.all().any { it.id == video.id }) "Queued" else "Queue"
+                isAllCaps = false
+                setOnClickListener { queueStore.toggle(video); updatePhoneQueueStatus(); renderPhoneResults(query) }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+            row.addView(Button(this).apply {
+                text = if (playlistStore.contains("My karaoke mix", video.id)) "In mix" else "Mix"
+                isAllCaps = false
+                setOnClickListener { playlistStore.toggle("My karaoke mix", video); updatePhoneQueueStatus(); renderPhoneResults(query) }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+            phoneResults.addView(row)
+            phoneResults.addView(space(6))
+        }
+    }
+
+    private fun updatePhoneQueueStatus() {
+        val mix = playlistStore.all().firstOrNull { it.name == "My karaoke mix" }?.videos?.size ?: 0
+        queueStatus.text = "Queue: ${queueStore.all().size} songs • My karaoke mix: $mix"
     }
 
     private fun updateCatalog() {
