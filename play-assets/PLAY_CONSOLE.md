@@ -8,7 +8,7 @@
 - App type: App
 - Price: Free
 - Category: Music & Audio
-- Version: `0.3.2` / version code `5`
+- Version: `0.3.3` / version code `6`
 - Release artifact: `../app/build/outputs/bundle/release/app-release.aab`
 
 ## Store listing

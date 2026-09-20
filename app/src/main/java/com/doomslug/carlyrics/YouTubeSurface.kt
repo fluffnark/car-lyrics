@@ -24,6 +24,10 @@ import androidx.car.app.SurfaceContainer
 
 /** Renders the unmodified YouTube iframe through Android's virtual-display car surface path. */
 class YouTubeSurface(private val context: Context) : VideoPlayer {
+    /** A real HTTPS WebView origin gives YouTube an identifiable embedder referrer. */
+    private companion object {
+        const val WEB_ORIGIN = "https://appassets.androidplatform.net"
+    }
     override var onStatus: ((PlaybackStatus) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
     private var hostSurface: Surface? = null
@@ -162,14 +166,14 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
         if (!authorized || !KaraokeVideo.ID.matches(value.id)) return
         val ticket = ++generation
         update(PlaybackStatus.LOADING)
-        val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"></head>
+        val html = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta name="referrer" content="strict-origin-when-cross-origin"></head>
           <body style="margin:0;background:#000;overflow:hidden"><div id="player"></div>
           <script src="https://www.youtube.com/iframe_api"></script><script>
           var player;
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
               width:'100%',height:'100%',videoId:'${value.id}',
-              playerVars:{playsinline:1,controls:1,autoplay:0,enablejsapi:1,origin:'https://com.doomslug.carlyrics'},
+              playerVars:{playsinline:1,controls:1,autoplay:0,enablejsapi:1,origin:'$WEB_ORIGIN'},
               events:{
                 onReady:function(e){console.log('CAR_LYRICS_READY:${value.id}:1');},
                 onStateChange:function(e){console.log('CAR_LYRICS_STATE:${value.id}:'+e.data);},
@@ -178,8 +182,8 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
             });
           }
           </script><style>html,body,#player{width:100%;height:100%;}</style></body></html>"""
-        // The installed app ID in baseUrl supplies YouTube's required HTTP Referer.
-        webView?.loadDataWithBaseURL("https://com.doomslug.carlyrics", html, "text/html", "UTF-8", null)
+        // A real HTTPS base URL supplies the Referer required by YouTube's embedded player.
+        webView?.loadDataWithBaseURL("$WEB_ORIGIN/", html, "text/html", "UTF-8", null)
         main.postDelayed({
             if (ticket == generation && authorized && status == PlaybackStatus.LOADING) update(PlaybackStatus.ERROR)
         }, 20_000L)

@@ -12,8 +12,8 @@ android {
         applicationId = "com.doomslug.carlyrics"
         minSdk = 29
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 6
+        versionName = "0.3.3"
     }
     signingConfigs {
         val signingFile = rootProject.file("signing/keystore.properties")
