@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -29,6 +31,9 @@ class MainActivity : Activity() {
     private lateinit var queueStatus: TextView
     private val queueStore by lazy { QueueStore(this) }
     private val playlistStore by lazy { PlaylistStore(this) }
+    private val searchHandler = Handler(Looper.getMainLooper())
+    private var searchGeneration = 0
+    private var remoteResults = emptyList<KaraokeVideo>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,7 +89,18 @@ class MainActivity : Activity() {
             background = panel(Color.rgb(28, 44, 57), 14)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { renderPhoneResults(s?.toString().orEmpty()) }
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    val query = s?.toString().orEmpty()
+                    remoteResults = emptyList()
+                    renderPhoneResults(query)
+                    val generation = ++searchGeneration
+                    searchHandler.removeCallbacksAndMessages(null)
+                    if (query.trim().length >= 2) searchHandler.postDelayed({
+                        YouTubeSearch.search(query) { results ->
+                            if (generation == searchGeneration) { remoteResults = results; renderPhoneResults(query) }
+                        }
+                    }, 450L)
+                }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
@@ -116,12 +132,15 @@ class MainActivity : Activity() {
         if (!::phoneResults.isInitialized) return
         phoneResults.removeAllViews()
         val normalized = query.trim().lowercase()
-        val source = if (normalized.isBlank()) SingKingCatalog.library.take(8) else
-            SingKingCatalog.library.filter { it.title.lowercase().contains(normalized) }.take(20)
+        val local = if (normalized.isBlank()) SingKingCatalog.library.take(8) else
+            SingKingCatalog.library.filter { it.title.lowercase().contains(normalized) }
+        val localIds = local.map { it.id }.toSet()
+        val source = (local + remoteResults.filter { it.id !in localIds }).take(if (normalized.isBlank()) 8 else 30)
         if (source.isEmpty()) {
-            phoneResults.addView(text("No matching karaoke videos yet.", 14f, muted))
+            phoneResults.addView(text(if (normalized.isBlank()) "Search YouTube for any karaoke provider." else "No matching YouTube videos yet.", 14f, muted))
             return
         }
+        if (normalized.isNotBlank() && remoteResults.isNotEmpty()) phoneResults.addView(text("YouTube results", 13f, gold, true))
         source.forEach { video ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
