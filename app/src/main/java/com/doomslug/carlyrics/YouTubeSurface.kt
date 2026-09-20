@@ -74,6 +74,7 @@ class YouTubeSurface(private val context: Context) : VideoPlayer {
                         override fun onPageFinished(view: WebView, url: String) {
                             if (watchPageFallback && authorized && desiredPlaying) {
                                 view.evaluateJavascript("document.querySelector('video')?.play();", null)
+                                update(PlaybackStatus.PLAYING)
                             }
                         }
                     }
