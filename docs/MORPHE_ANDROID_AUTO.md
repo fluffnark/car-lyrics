@@ -2,6 +2,12 @@
 
 Checked September 20, 2026 against [Morphe Patches](https://github.com/MorpheApp/morphe-patches) and the Morphe documentation.
 
+## Pixel verification (September 20, 2026)
+
+On the connected Pixel 7a, Morphe YouTube is installed as `app.morphe.android.youtube` with Morphe GmsCore/Revanced GMS. A Sing King karaoke URL launched successfully through Morphe and played while signed in. The app exposes an active Android `MediaSession`; Android media key events paused and resumed the video, and its metadata reported `Queen - Bohemian Rhapsody (Karaoke Version)`.
+
+The Morphe package also exposes `MainAppMediaBrowserService`, so Android Auto can discover its media controls if the host accepts the service. Its current session did not expose a queue (`queueTitle=null`, `size=0`), so a queue in Car Lyrics would need to remain app-owned and launch one selected URL at a time.
+
 ## What Morphe provides
 
 Morphe patches the official YouTube APK. The current patch list includes an **Automotive** form-factor option, fullscreen scaling, background playback, media notification controls, and a video queue. The Automotive option changes the YouTube UI layout; it does not add an Android Auto `CarAppService` or a car launcher activity.
@@ -30,7 +36,7 @@ The result would also need a distinct package/signature and would not be a norma
 
 ### 3. Mirror Morphe's phone screen
 
-MediaProjection or an external screen-capture path could send Morphe's phone video to a car surface. This is the same family of approach as the earlier Morphe capture experiment: it requires a phone consent flow, is fragile across reconnects, and does not provide reliable Mazda knob control. It is unsuitable for the “phone stays in pocket” flow.
+MediaProjection or an external screen-capture path could capture Morphe on the phone, but Android Auto does not provide a general third-party screen-share channel to put those pixels on a Mazda head unit. A capture stream would still need a supported Android Auto parked/video surface, repeated consent, and a custom transport. It would not automatically provide reliable Mazda knob control. It is unsuitable for the “phone stays in pocket” flow.
 
 ## Recommended experiment
 
