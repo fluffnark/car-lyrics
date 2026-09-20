@@ -42,7 +42,7 @@ Car Lyrics now contains an opt-in development experiment for this route. It requ
 
 ### Desktop Head Unit check
 
-The Android Auto Desktop Head Unit is installed on the development machine. With Android Auto's **Start head unit server** enabled on the Pixel and the DHU started in USB mode, Car Lyrics appeared in the launcher. The DHU accepted rotary/d-pad navigation through the recent list and opened the player template. The player action strip rendered, but the custom video surface stayed black in this emulator run; the embedded video path therefore still needs a rendering fix or a real surface test before relying on it in the Mazda. The DHU command used was:
+The Android Auto Desktop Head Unit is installed on the development machine. With Android Auto's **Start head unit server** enabled on the Pixel and the DHU connected over ADB, Car Lyrics appeared in the launcher. The DHU accepted rotary/d-pad navigation through the recent list and opened the player template. A fresh run reported a valid 770×700 presentation surface and hardware WebView. The Sing King test upload then returned YouTube error 150 because its owner disables embedding; this confirms a source restriction rather than a missing Android Auto surface. End-to-end playback still needs a playable upload or the Morphe mirror path. The DHU command used was:
 
 ```sh
 adb -s 32021JEHN04408 forward tcp:5277 tcp:5277
