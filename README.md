@@ -2,13 +2,13 @@
 
 A private Android Auto karaoke prototype for a 2021 Mazda CX-5. It lists recent uploads from [Sing King Karaoke](https://www.youtube.com/@singkingkaraoke) on the car screen. Turn and press the Mazda Commander knob to choose a video, then use the host-rendered Previous, Next, Play/Pause, Save, and Browse controls. The selected karaoke video is designed to play in an official YouTube iframe rendered to Android Auto's custom surface. **No phone taps, Morphe launch, screen-sharing prompt, account, or API key are required during the car flow.** Playback on the actual Mazda display remains unverified.
 
-## Parked car flow
+## Car flow
 
 1. Connect the Pixel to Android Auto and open **Car Lyrics** on the Mazda display.
-2. Browse the recent Sing King videos using the Commander knob. Four videos are shown per page with thumbnails and More/Previous page rows. Choose one while parked.
+2. Browse the recent Sing King videos using the Commander knob. Four videos are shown per page with thumbnails and More/Previous page rows. Choose one.
    Use **Search** to type or speak a song, artist, album, or genre through Android Auto's search UI. **Genres & albums** opens curated Sing King collections such as Pop, Rock, Country, Musicals, K-pop, 80s, 90s, Duets, Taylor Swift's *Lover*, and Melanie Martinez's *K-12*.
 3. Use the Commander knob to pause, resume, skip, save a song, or return to browsing. The Saved/Recent header action switches lists. Hardware Back returns from the player to browsing.
-4. Browsing stops the video. If the car API reports movement, the app hides the player and returns to browsing.
+4. Browsing stops the video. Browse and playback are enabled for development testing regardless of the car's reported speed.
 
 When a video is selected, **Queue** adds or removes it from the persistent Up Next list. **Add to mix** adds or removes it from `My karaoke mix` and the Saved list. Browse the Queue or Playlists rows at the top of the car screen to review a set, then choose any queued or playlist song to play it.
 
@@ -24,7 +24,7 @@ ANDROID_HOME=/home/doomslug/.local/share/mise/installs/android-sdk/23.0 \
 ./gradlew :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
 ```
 
-The signed release APK is at `app/build/outputs/apk/release/app-release.apk` and the signed release AAB is at `app/build/outputs/bundle/release/app-release.aab` (version `0.3.3`, version code `6`). Automated tests cover feed parsing, saved-song persistence, browse and pagination, search entry, selecting a song, playback actions, error retry, and hardware Back. The player now requests media audio focus before loading a video and releases it when browsing stops. The YouTube wrapper supplies a real HTTPS WebView origin and strict referrer policy so the embedded player can identify its host. The phone companion screen was rendered and visually reviewed. The connected Pixel 7a fetched and cached 15 live Sing King videos. **Car display playback, YouTube WebView rendering, audio routing, voice search, and Mazda knob behavior still require a real-car test.**
+The signed release APK is at `app/build/outputs/apk/release/app-release.apk` and the signed release AAB is at `app/build/outputs/bundle/release/app-release.aab` (version `0.3.4`, version code `7`). Automated tests cover feed parsing, saved-song persistence, browse and pagination, search entry, selecting a song, playback actions, error retry, and hardware Back. The player now requests media audio focus before loading a video and releases it when browsing stops. The YouTube wrapper supplies a real HTTPS WebView origin and strict referrer policy so the embedded player can identify its host. The app does not read car speed or gate browsing and playback on parking. The phone companion screen was rendered and visually reviewed. The connected Pixel 7a fetched and cached 15 live Sing King videos. **Car display playback, YouTube WebView rendering, audio routing, voice search, and Mazda knob behavior still require a real-car test.**
 
 The release build uses the local upload key in `signing/car-lyrics-upload.jks`, configured by the ignored `signing/keystore.properties`. Back up that key and its password before using Play Console for future updates. Play App Signing can re-sign the distributed APKs with Google's app-signing key.
 
@@ -36,7 +36,7 @@ The service declares the POI category, app icon, `template` capability, and Goog
 
 Since you have Play Console access, upload `app/build/outputs/bundle/release/app-release.aab` to **Internal testing** or **Internal app sharing**. Add the Pixel's Google account as a tester, install the Play-provided link on the phone, then reconnect Android Auto. Keep that Play-installed copy for the Mazda test; an `adb install` replacement changes the trusted install source.
 
-The app's POI surface is an experimental private route: [Android documents virtual displays on car surfaces for map-capable apps](https://developer.android.com/training/cars/apps/library/draw-maps), while [video apps on Android Auto are still early access](https://developer.android.com/training/cars/whats-new). A host could reject this use of the POI category. For this development build, all selection and playback actions are intentionally enabled while moving so the Mazda flow can be diagnosed; restore parked-only actions before any driving use.
+The app's POI surface is an experimental private route: [Android documents virtual displays on car surfaces for map-capable apps](https://developer.android.com/training/cars/apps/library/draw-maps), while [video apps on Android Auto are still early access](https://developer.android.com/training/cars/whats-new). A host could reject this use of the POI category. This development build does not read car speed or gate browsing and playback on parking.
 
 The previous screen-sharing APK and Spotify/lyric-library design are superseded. Their research remains in [docs/PLAN.md](docs/PLAN.md), [docs/PRODUCT_WORKFLOW.md](docs/PRODUCT_WORKFLOW.md), and [docs/OPEN_SOURCE_OPTIONS.md](docs/OPEN_SOURCE_OPTIONS.md).
 

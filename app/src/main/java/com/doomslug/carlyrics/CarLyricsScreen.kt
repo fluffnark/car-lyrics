@@ -4,10 +4,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
-import androidx.car.app.hardware.CarHardwareManager
-import androidx.car.app.hardware.common.CarValue
-import androidx.car.app.hardware.common.OnCarDataAvailableListener
-import androidx.car.app.hardware.info.Speed
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarIcon
@@ -45,20 +41,9 @@ class CarLyricsScreen(
     private val queueStore = QueueStore(context)
     private var activePlaylist: KaraokePlaylist? = null
     private var playback = PlaybackStatus.IDLE
-    private var moving = false
-    private var speedRegistered = false
     private val back = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() { browse() }
     }
-    private val speedListener = OnCarDataAvailableListener<Speed> { reading ->
-        val value = reading.rawSpeedMetersPerSecond
-        val speed = value.value
-        if (value.status == CarValue.STATUS_SUCCESS && speed != null) {
-            val nowMoving = speed > 0.5f
-            moving = nowMoving
-        }
-    }
-
     init {
         lifecycle.addObserver(this)
         carContext.onBackPressedDispatcher.addCallback(this, back)
@@ -73,10 +58,6 @@ class CarLyricsScreen(
             SingKingCatalog.initialize(carContext)
             if (catalog.videos.isEmpty() || SingKingCatalog.isStale()) refresh()
         } else if (catalog.videos.isEmpty() && !catalog.loading) refresh()
-        speedRegistered = runCatching {
-            carContext.getCarService(CarHardwareManager::class.java).carInfo
-                .addSpeedListener(carContext.mainExecutor, speedListener)
-        }.isSuccess
     }
 
     override fun onStop(owner: LifecycleOwner) {
@@ -84,10 +65,6 @@ class CarLyricsScreen(
         mode = Mode.BROWSE
         back.isEnabled = false
         playback = PlaybackStatus.IDLE
-        if (speedRegistered) runCatching {
-            carContext.getCarService(CarHardwareManager::class.java).carInfo.removeSpeedListener(speedListener)
-        }
-        speedRegistered = false
     }
 
     override fun onDestroy(owner: LifecycleOwner) { player.close() }

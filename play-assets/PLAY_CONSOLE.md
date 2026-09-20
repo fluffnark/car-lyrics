@@ -8,7 +8,7 @@
 - App type: App
 - Price: Free
 - Category: Music & Audio
-- Version: `0.3.3` / version code `6`
+- Version: `0.3.4` / version code `7`
 - Release artifact: `../app/build/outputs/bundle/release/app-release.aab`
 
 ## Store listing
@@ -19,7 +19,7 @@ Browse, queue, and play karaoke videos from your Android Auto car screen.
 
 ### Full description
 
-Car Lyrics is a private Android Auto karaoke prototype for parked use.
+Car Lyrics is a private Android Auto karaoke prototype.
 
 Browse Sing King karaoke videos with the car's rotary controller, search by song or artist, use voice input through Android Auto, explore genre and album collections, build a queue, and curate local karaoke playlists.
 

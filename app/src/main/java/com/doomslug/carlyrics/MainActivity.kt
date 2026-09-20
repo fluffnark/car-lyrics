@@ -46,9 +46,9 @@ class MainActivity : Activity() {
         body.addView(space(24))
         body.addView(text("CAR LYRICS", 13f, mint, true).apply { letterSpacing = 0.18f })
         body.addView(space(8))
-        body.addView(text("Your parked karaoke stage.", 36f, ink, true))
+        body.addView(text("Your karaoke stage.", 36f, ink, true))
         body.addView(space(12))
-        body.addView(text("Choose a Sing King song with your Mazda Commander knob while parked. Your phone stays in your pocket.", 17f, muted))
+        body.addView(text("Choose a Sing King song with your Mazda Commander knob. Your phone stays in your pocket.", 17f, muted))
         body.addView(space(28))
 
         val card = LinearLayout(this).apply {
@@ -60,7 +60,7 @@ class MainActivity : Activity() {
         card.addView(space(12))
         card.addView(text("Connect your Pixel, then open Car Lyrics on the Mazda display.", 20f, ink, true))
         card.addView(space(8))
-        card.addView(text("Browse, play, save, and skip from the car screen while parked.", 15f, muted))
+        card.addView(text("Browse, play, save, and skip from the car screen.", 15f, muted))
         body.addView(card)
         body.addView(space(30))
         body.addView(text("SING KING • RECENT", 13f, gold, true).apply { letterSpacing = 0.12f })
@@ -70,7 +70,7 @@ class MainActivity : Activity() {
         preview = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(preview)
         body.addView(space(30))
-        body.addView(text("Video appears only after you select a song while parked. Some YouTube uploads may block embedding or show ads.", 14f, muted))
+        body.addView(text("Video appears after you select a song. Some YouTube uploads may block embedding or show ads.", 14f, muted))
         setContentView(scroll)
 
         SingKingCatalog.initialize(this)
