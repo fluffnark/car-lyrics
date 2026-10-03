@@ -20,8 +20,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.media.projection.MediaProjectionManager
+import android.provider.Settings
 
-/** A companion status screen. The car flow requires no phone interaction. */
+/** Session setup and passenger queue; song selection and transport controls also work in the car. */
 class MainActivity : Activity() {
     private val ink = Color.rgb(240, 247, 248)
     private val muted = Color.rgb(158, 178, 188)
@@ -59,12 +60,12 @@ class MainActivity : Activity() {
             setImageResource(R.drawable.ic_launcher)
             layoutParams = LinearLayout.LayoutParams(dp(72), dp(72))
         })
-        body.addView(space(24))
+        body.addView(space(12))
         body.addView(text("CAR LYRICS", 13f, mint, true).apply { letterSpacing = 0.18f })
         body.addView(space(8))
         body.addView(text("Your karaoke stage.", 36f, ink, true))
         body.addView(space(12))
-        body.addView(text("Choose a Sing King song with your Mazda Commander knob. Your phone stays in your pocket.", 17f, muted))
+        body.addView(text("Choose a Sing King song with your Mazda Commander knob. Start Morphe sharing once, then use the car controls.", 17f, muted))
         body.addView(space(28))
 
         val card = LinearLayout(this).apply {
@@ -77,24 +78,38 @@ class MainActivity : Activity() {
         card.addView(text("Connect your Pixel, then open Car Lyrics on the Mazda display.", 20f, ink, true))
         card.addView(space(8))
         card.addView(text("Browse, play, save, and skip from the car screen.", 15f, muted))
-        body.addView(card)
-        body.addView(space(14))
         val morpheCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(18), dp(20), dp(18))
             background = panel(Color.rgb(35, 42, 61), 20)
         }
-        morpheCard.addView(text("EXPERIMENTAL MORPHE MIRROR", 12f, gold, true).apply { letterSpacing = 0.10f })
+        morpheCard.addView(text("MORPHE ON YOUR CAR SCREEN", 12f, gold, true).apply { letterSpacing = 0.10f })
         morpheCard.addView(space(8))
-        morpheStatus = text("Approve screen share, select Morphe in the picker, then use the Mazda screen and knob.", 14f, muted)
+        morpheStatus = text("Share only Morphe in Android’s picker. Your existing YouTube login and karaoke video stay in Morphe.", 14f, muted)
         morpheCard.addView(morpheStatus)
         morpheCard.addView(space(10))
         morpheCard.addView(Button(this).apply {
-            text = "Enable Morphe screen share"
+            text = "Start Morphe sharing"
             isAllCaps = false
             setOnClickListener { requestMorpheCapture() }
         })
+        morpheCard.addView(Button(this).apply {
+            text = "Enable Morphe controls"
+            isAllCaps = false
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                    .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MorpheMediaAccess.component(this@MainActivity).flattenToString()))
+            }
+        })
+        morpheCard.addView(text("Android calls this notification access. Car Lyrics uses it only to read Morphe’s playback state and send playback controls; it does not read or save your messages.", 13f, muted))
+        morpheCard.addView(Button(this).apply {
+            text = "Stop sharing"
+            isAllCaps = false
+            setOnClickListener { stopService(Intent(this@MainActivity, MorpheProjectionService::class.java)) }
+        })
         body.addView(morpheCard)
+        body.addView(space(14))
+        body.addView(card)
         body.addView(space(30))
         body.addView(text("PASSENGER QUEUE", 13f, mint, true).apply { letterSpacing = 0.14f })
         body.addView(space(8))
@@ -139,7 +154,7 @@ class MainActivity : Activity() {
         preview = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(preview)
         body.addView(space(30))
-        body.addView(text("Video appears after you select a song. Some YouTube uploads may block embedding or show ads.", 14f, muted))
+        body.addView(text("Keep the phone unlocked while sharing. Android may ask you to approve sharing again after locking or reconnecting.", 14f, muted))
         setContentView(scroll)
 
         SingKingCatalog.initialize(this)
@@ -149,6 +164,9 @@ class MainActivity : Activity() {
     }
 
     private fun requestMorpheCapture() {
+        if (MorpheCaptureGrant.isGranted) { updateMorpheStatus(); return }
+        val morphe = packageManager.getLaunchIntentForPackage(MorpheMediaAccess.PACKAGE)
+        if (morphe == null) { morpheStatus.text = "Install Morphe YouTube on this phone first."; return }
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_MORPHE_CAPTURE)
     }
@@ -157,10 +175,33 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_MORPHE_CAPTURE || resultCode != RESULT_OK || data == null) return
-        MorpheCaptureGrant.resultCode = resultCode
-        MorpheCaptureGrant.data = data
+        startForegroundService(Intent(this, MorpheProjectionService::class.java).apply {
+            action = MorpheProjectionService.ACTION_START
+            putExtra(MorpheProjectionService.EXTRA_RESULT_CODE, resultCode)
+            putExtra(MorpheProjectionService.EXTRA_DATA, data)
+        })
         getSharedPreferences("car_lyrics", MODE_PRIVATE).edit().putBoolean("morphe_mirror_enabled", true).apply()
-        if (::morpheStatus.isInitialized) morpheStatus.text = "Enabled. Reopen Car Lyrics on the Mazda, then choose a song."
+        updateMorpheStatus()
+    }
+
+    private val captureChanged: () -> Unit = { updateMorpheStatus() }
+
+    override fun onStart() {
+        super.onStart()
+        MorpheCaptureGrant.observe(captureChanged)
+        updateMorpheStatus()
+    }
+
+    override fun onStop() {
+        MorpheCaptureGrant.removeObserver(captureChanged)
+        super.onStop()
+    }
+
+    private fun updateMorpheStatus() {
+        if (!::morpheStatus.isInitialized) return
+        morpheStatus.text = if (!MorpheMediaAccess.enabled(this))
+            "Enable Morphe controls below, then start sharing and select only Morphe in Android’s picker."
+        else MorpheCaptureGrant.message
     }
 
     private fun renderPhoneResults(query: String) {

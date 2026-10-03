@@ -1,6 +1,6 @@
 # Car Lyrics Privacy Policy
 
-**Effective date: September 20, 2026**
+**Effective date: October 2, 2026**
 
 Car Lyrics is a private Android Auto prototype developed by Caleb Cheng ("we", "us", or "our"). This policy explains what the app does with information when you use it.
 
@@ -10,16 +10,20 @@ Car Lyrics does not require an account and does not operate a server. We do not 
 
 The app stores your queue, saved videos, local playlists, and related song metadata on your Android device so those features work between sessions. This local information is not uploaded to us.
 
-When Android Auto provides vehicle speed to the app, Car Lyrics uses it only in memory for the car display. It does not store or transmit vehicle speed, location, or driving history.
+Car Lyrics does not read or store vehicle speed, location, or driving history.
 
 ## Network and third-party services
 
-Car Lyrics connects to the internet to load public karaoke video listings and to play selected videos through YouTube's embedded player. YouTube and Google may process requests, cookies, device information, and viewing activity under their own policies. YouTube may also show advertising or restrict playback. Their terms and privacy policy apply to those services:
+Car Lyrics connects to the internet to load public karaoke video listings and to open selected videos in the installed Morphe YouTube app (or through the older embedded player). YouTube and Google may process requests, cookies, device information, and viewing activity under their own policies. YouTube may also show advertising or restrict playback. Their terms and privacy policy apply to those services:
 
 - [Google Privacy Policy](https://policies.google.com/privacy)
 - [YouTube Terms of Service](https://www.youtube.com/t/terms)
 
 Car Lyrics does not receive or store your YouTube password, Google password, or YouTube account credentials.
+
+## Screen sharing and playback controls
+
+With your Android screen-sharing approval, Car Lyrics captures the selected app’s video frames in memory and displays them through Android Auto. It does not record or upload those frames to a server. Android notification access is used only to identify and control Morphe’s media session and read playback state; Car Lyrics does not read or save notification contents. Google sign-in and viewing activity remain in the selected player.
 
 ## Data security and retention
 

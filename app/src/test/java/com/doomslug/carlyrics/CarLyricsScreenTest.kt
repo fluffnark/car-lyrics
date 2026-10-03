@@ -50,6 +50,9 @@ class CarLyricsScreenTest {
         assertEquals("Pause", playing.actionStrip!!.actions[0].title.toString())
         playing.actionStrip!!.actions[0].onClickDelegate!!.sendClick(done)
         assertEquals(1, player.pauses)
+        // A command being sent is not proof that Morphe actually paused.
+        assertEquals("Pause", (screen.onGetTemplate() as MapWithContentTemplate).actionStrip!!.actions[0].title.toString())
+        player.onStatus?.invoke(PlaybackStatus.PAUSED)
         val paused = screen.onGetTemplate() as MapWithContentTemplate
         assertEquals("Play", paused.actionStrip!!.actions[0].title.toString())
         paused.actionStrip!!.actions[2].onClickDelegate!!.sendClick(done)

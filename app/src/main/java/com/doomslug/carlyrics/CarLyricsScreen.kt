@@ -27,8 +27,7 @@ class CarLyricsScreen(
     context: CarContext,
     private val catalog: VideoCatalog = SingKingCatalog,
     private val player: VideoPlayer = if (
-        context.getSharedPreferences("car_lyrics", 0).getBoolean("morphe_mirror_enabled", false) &&
-        MorpheCaptureGrant.isGranted
+        context.getSharedPreferences("car_lyrics", 0).getBoolean("morphe_mirror_enabled", true)
     ) MorpheScreenShare(context) else YouTubeSurface(context),
     private val saved: SavedVideos = SavedVideos(context),
 ) : Screen(context), DefaultLifecycleObserver {
@@ -52,7 +51,7 @@ class CarLyricsScreen(
         lifecycle.addObserver(this)
         carContext.onBackPressedDispatcher.addCallback(this, back)
         player.onStatus = { next ->
-            if (mode == Mode.PLAYER && playback != next) { playback = next; invalidate() }
+            if (mode == Mode.PLAYER) { playback = next; invalidate() }
         }
     }
 
@@ -63,6 +62,8 @@ class CarLyricsScreen(
             SingKingCatalog.initialize(carContext)
             if (catalog.videos.isEmpty() || SingKingCatalog.isStale()) refresh()
         } else if (catalog.videos.isEmpty() && !catalog.loading) refresh()
+        // onStop returns us to browse; replace any template cached by the host.
+        invalidate()
     }
 
     override fun onStop(owner: LifecycleOwner) {
@@ -75,9 +76,8 @@ class CarLyricsScreen(
     override fun onDestroy(owner: LifecycleOwner) { player.close() }
 
     override fun onGetTemplate(): Template {
-        // Some hosts create the MapWithContent surface after onStart. Re-registering
-        // here makes the callback resilient to that ordering and to host reconnects.
-        registerSurface()
+        // Register once in onStart. Registering on every status/template update
+        // causes the host to resend its surface and repeatedly restart playback.
         return when (mode) {
         Mode.BROWSE -> browseTemplate()
         Mode.SEARCH -> searchTemplate()
@@ -189,7 +189,7 @@ class CarLyricsScreen(
 
     private fun queueTemplate(): Template {
         val items = queueStore.all()
-        val list = ItemList.Builder().setNoItemsMessage("Add songs from the player with Queue")
+        val list = ItemList.Builder().setNoItemsMessage("Add songs with Queue in the phone app")
         items.forEach { video ->
             list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("Queued")
                 .setOnClickListener { select(items, items.indexOf(video)) }.build())
@@ -210,7 +210,7 @@ class CarLyricsScreen(
 
     private fun playlistTemplate(): Template {
         val playlist = activePlaylist ?: return playlistsTemplate()
-        val list = ItemList.Builder().setNoItemsMessage("Add songs from the player with Add to mix")
+        val list = ItemList.Builder().setNoItemsMessage("Add songs with Mix in the phone app")
         playlist.videos.forEach { video ->
             list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("${playlist.name} • karaoke")
                 .setOnClickListener { select(playlist.videos, playlist.videos.indexOf(video)) }.build())
@@ -221,7 +221,7 @@ class CarLyricsScreen(
 
     private fun playerTemplate(): Template {
         val current = queue.getOrNull(selected)
-        val state = when (playback) {
+        val state = player.statusDetail ?: when (playback) {
             PlaybackStatus.IDLE -> "Ready"
             PlaybackStatus.LOADING -> "Loading video…"
             PlaybackStatus.PLAYING -> "Playing • ${selected + 1} of ${queue.size}"
@@ -239,11 +239,40 @@ class CarLyricsScreen(
         val playbackAction = when (playback) {
             PlaybackStatus.LOADING, PlaybackStatus.PLAYING -> Action.Builder()
                 .setTitle("Pause").setIcon(icon(R.drawable.ic_pause))
-                .setOnClickListener { player.pause(); playback = PlaybackStatus.PAUSED; invalidate() }.build()
+                .setOnClickListener { player.pause() }.build()
             else -> Action.Builder()
                 .setTitle(if (playback == PlaybackStatus.ERROR) "Retry" else "Play")
                 .setIcon(icon(R.drawable.ic_play))
-                .setOnClickListener { player.resume(); playback = PlaybackStatus.LOADING; invalidate() }.build()
+                .setOnClickListener { player.resume() }.build()
+        }
+        if (player.compactControls) {
+            val pausable = playback == PlaybackStatus.PLAYING || playback == PlaybackStatus.LOADING
+            val compactPlayback = Action.Builder().setIcon(icon(
+                if (pausable) R.drawable.ic_pause else R.drawable.ic_play
+            )).setOnClickListener { if (pausable) player.pause() else player.resume() }.build()
+            val compactPane = Pane.Builder().addRow(Row.Builder().setTitle(
+                if (player.statusDetail != null) state else "Morphe • $state"
+            ).build())
+            if (player.statusDetail != null) compactPane.addAction(Action.Builder().setTitle("Phone setup")
+                .setOnClickListener {
+                    runCatching {
+                        carContext.applicationContext.startActivity(android.content.Intent(carContext, MainActivity::class.java)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            android.app.ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle())
+                    }.onFailure {
+                        Log.w("CarLyricsPlayer", "Phone setup could not open", it)
+                        androidx.car.app.CarToast.makeText(carContext, "Open Car Lyrics on your phone to start sharing", androidx.car.app.CarToast.LENGTH_LONG).show()
+                    }
+                }.build())
+            return MapWithContentTemplate.Builder()
+                .setContentTemplate(PaneTemplate.Builder(compactPane.build()).build())
+                .setActionStrip(ActionStrip.Builder()
+                    .addAction(Action.Builder().setIcon(icon(R.drawable.ic_previous)).setOnClickListener { step(-1) }.build())
+                    .addAction(compactPlayback)
+                    .addAction(Action.Builder().setIcon(icon(R.drawable.ic_next)).setOnClickListener { step(1) }.build())
+                    .addAction(Action.Builder().setIcon(icon(R.drawable.ic_browse))
+                        .setOnClickListener { browse() }.build()).build())
+                .build()
         }
         val savedAction = Action.Builder()
             .setTitle(if (current != null && playlists.contains("My karaoke mix", current.id)) "In mix" else "Add to mix")

@@ -1,6 +1,6 @@
 # Car Lyrics: Mazda car-screen prototype plan
 
-> Superseded exploration: the current MVP uses knob browsing of Sing King's recent uploads and an embedded YouTube player on the car surface. The earlier Morphe capture attempt required phone consent each session and was removed. See the root README for the current build and its limitations. The Spotify plan below is retained as prior research.
+> Historical Spotify exploration. The current prototype uses Morphe single-app capture for YouTube karaoke playback. See the root README and MORPHE_ANDROID_AUTO.md for verified results and the active plan.
 
 Updated 2026-09-19 after confirming the target: lyrics must appear on the 2021 Mazda CX-5 display and all app controls must work with its Commander knob. The connected Pixel 7a runs Android 17 and has Spotify and YouTube Music installed. Spotify Premium is available. This is a separate repository from `car-dashboard`; its unrelated local changes were left untouched.
 

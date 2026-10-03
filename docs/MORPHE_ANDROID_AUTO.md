@@ -1,69 +1,56 @@
-# Morphe and Android Auto investigation
+# Morphe playback on Android Auto
 
-Checked September 20, 2026 against [Morphe Patches](https://github.com/MorpheApp/morphe-patches) and the Morphe documentation.
+Updated October 2, 2026. This replaces the earlier hypothesis-only investigation: **the installed Morphe app's actual video has now been rendered on the desktop Android Auto head unit.** Physical Mazda testing remains outstanding.
 
-## Pixel verification (September 20, 2026)
+## Current implementation
 
-On the connected Pixel 7a, Morphe YouTube is installed as `app.morphe.android.youtube` with Morphe GmsCore/Revanced GMS. A Sing King karaoke URL launched successfully through Morphe and played while signed in. The app exposes an active Android `MediaSession`; Android media key events paused and resumed the video, and its metadata reported `Queen - Bohemian Rhapsody (Karaoke Version)`.
-
-The Morphe package also exposes `MainAppMediaBrowserService`, so Android Auto can discover its media controls if the host accepts the service. Its current session did not expose a queue (`queueTitle=null`, `size=0`), so a queue in Car Lyrics would need to remain app-owned and launch one selected URL at a time.
-
-## What Morphe provides
-
-Morphe patches the official YouTube APK. The current patch list includes an **Automotive** form-factor option, fullscreen scaling, background playback, media notification controls, and a video queue. The Automotive option changes the YouTube UI layout; it does not add an Android Auto `CarAppService` or a car launcher activity.
-
-The repository has a **Bypass certificate checks** patch specifically under YouTube Music's Android Auto patches. That is for YouTube Music's native Android Auto media integration. I did not find a corresponding Android Auto integration for the regular YouTube package.
-
-Non-root patched installs use Morphe MicroG/GmsCore support. Google sign-in happens inside the patched app on the Pixel; Car Lyrics should never handle or store the Google password.
-
-## What can work
-
-### 1. Morphe as the phone-side player
-
-Install patched YouTube plus Morphe MicroG, sign in on the Pixel, and verify that playback exposes a normal Android `MediaSession`. Car Lyrics could then:
-
-- send a selected YouTube URL to Morphe;
-- observe the active title, artist/channel, duration, and position;
-- display lyrics and queue controls through our Android Auto service.
-
-This gives Morphe ownership of playback and login. It does **not** put Morphe's video pixels on the Mazda display. Android Auto media sessions provide audio metadata and controls, not an arbitrary phone app window.
-
-### 2. Add a car service to a Morphe fork
-
-This would require modifying the patched YouTube APK to include a `CarAppService`, car manifest metadata, Android Auto host compatibility, and a custom surface/player bridge. It is a substantial binary-patching project because Morphe is a patch set applied to a version-specific stock APK, not a standalone YouTube source tree. Every YouTube APK update could break the patch anchors and the car integration.
-
-The result would also need a distinct package/signature and would not be a normal Play-distributed YouTube app. Morphe Patches are GPLv3 with additional attribution and branding conditions; derivative code must preserve notices and use distinct branding.
-
-### 3. Mirror Morphe's phone screen
-
-MediaProjection or an external screen-capture path could capture Morphe on the phone, but Android Auto does not provide a general third-party screen-share channel to put those pixels on a Mazda head unit. A capture stream would still need a supported Android Auto parked/video surface, repeated consent, and a custom transport. It would not automatically provide reliable Mazda knob control. It is unsuitable for the “phone stays in pocket” flow.
-
-Car Lyrics now contains an opt-in development experiment for this route. It requests MediaProjection consent on the phone, asks the user to select Morphe in Android's single-app picker, starts a foreground capture service, and feeds the captured frames into the existing `SurfaceCallback` virtual display. This is a hypothesis test for the Pixel/Mazda combination, not a claim that Android Auto will accept arbitrary mirrored pixels. The capture is intentionally off by default.
-
-### Desktop Head Unit check
-
-The Android Auto Desktop Head Unit is installed on the development machine. With Android Auto's **Start head unit server** enabled on the Pixel and the DHU connected over ADB, Car Lyrics appeared in the launcher. The DHU accepted rotary/d-pad navigation through the recent list and opened the player template. A fresh run reported a valid 770×700 presentation surface and hardware WebView. The Sing King test upload then returned YouTube error 150 because its owner disables embedding; this confirms a source restriction rather than a missing Android Auto surface. End-to-end playback still needs a playable upload or the Morphe mirror path. The DHU command used was:
-
-```sh
-adb -s 32021JEHN04408 forward tcp:5277 tcp:5277
-LD_LIBRARY_PATH=/tmp/dhu-libs/usr/lib:$ANDROID_HOME/extras/google/auto \
-  $ANDROID_HOME/extras/google/auto/desktop-head-unit --usb \
-  --config=$ANDROID_HOME/extras/google/auto/config/default_720p.ini
+```mermaid
+flowchart LR
+    P[Phone search and saved queue] --> C[Car Lyrics host controls]
+    C -->|Selected URL on phone display| M[Morphe YouTube]
+    C -->|Targeted MediaController| M
+    M -->|Single-app MediaProjection| T[Permanent SurfaceTexture]
+    T --> G[OpenGL aspect-fit renderer]
+    G --> S[Android Auto custom surface]
+    M -->|Original audio| A[Android Auto audio routing]
 ```
 
-## Recommended experiment
+- **Morphe owns login and playback.** Car Lyrics launches `app.morphe.android.youtube` with an explicit YouTube URL, using application context and phone display 0. Using CarContext directly attempted to launch on Android Auto's private display and failed with SecurityException.
+- **One consent, one projection, one virtual display.** Consent is consumed immediately by the foreground service. It is not cached or reused. Android requires new consent after the capture session stops.
+- **Stable video input, replaceable car output.** Directly replacing the virtual display's output with each host surface produced black video. `MorpheVideoRenderer` keeps a permanent SurfaceTexture input and replaces only its EGL car output. It uses the SurfaceTexture transform matrix and aspect-fit scaling, capped at 1280 pixels on the capture's longest edge.
+- **Morphe-specific controls.** Notification-listener access grants the app access to MediaSessionManager. Only the Morphe package is selected. No notification contents are read or retained. The car UI follows actual playback state; sending Pause alone does not claim that playback paused.
+- **Host UI and video are separate.** Previous, Pause/Play, Next, and Browse are template actions. The mirrored YouTube UI itself is not wired to rotary input. Browsing keeps Morphe playback and capture alive.
 
-1. Install Morphe YouTube and Morphe MicroG on the Pixel without sharing credentials with the development environment.
-2. Sign in and play a known karaoke video on the phone.
-3. Verify its package, media session, title, position, pause, next, and queue behavior with ADB.
-4. Connect Android Auto and check whether Morphe YouTube appears in the launcher. Expect it not to appear unless it has a supported car service; the Morphe Android Auto instructions primarily apply to YouTube Music.
-5. If the media session is usable, add a Car Lyrics “Play in Morphe” bridge. Keep our existing embedded player as the display path and use Morphe for videos that reject embedding.
+## Observed checks
 
-If the requirement is that Morphe's actual video pixels appear on the 2021 Mazda display, the forked car-service route or an approved Android Auto parked-video app is required. A normal Morphe APK installed on the phone cannot expose its full UI through Android Auto by itself.
+| Check | Result |
+| --- | --- |
+| Pixel 7a / Android 17 / Morphe 21.04.223 | Installed and used existing Morphe login |
+| 1280×720 DHU | Actual karaoke video and lyrics visible; host retained Maps side panel |
+| 800×480 DHU | Full app area with compact controls and aspect-fitted video |
+| Select, pause, resume, manual next | Correct Morphe video/media state observed |
+| Browse and surface replacement | Capture continues; renderer reattaches without fresh consent |
+| Audio | Isolated DHU stream contained audio after correcting test mixer volume; measured peak −32.6 dBFS in a short sample |
+| Rotary-only DHU | Focus did not respond reliably to CLI rotary commands; unresolved |
+| Unit tests | 11 passed |
+| Physical Mazda / measured A/V offset / voice | Not verified |
 
-## Relevant references
+A screenshot of a valid surface or a PLAYING media state alone is not proof of video rendering. The desktop checks inspected actual captured lyric frames. Short screenshots and mixer checks do not establish an audio/video synchronization bound.
 
-- [Morphe patch list and supported versions](https://github.com/MorpheApp/morphe-patches)
-- [Morphe Android Auto troubleshooting](https://github.com/MorpheApp/morphe-documentation/blob/main/docs/morphe-resources/troubleshooting_questions.md#34-patched-app-does-not-work-with-android-auto)
-- [Android Auto parked app support](https://developer.android.com/training/cars/parked/auto)
-- [Android for Cars app categories](https://developer.android.com/design/ui/cars/guides/foundations/cal)
+## Next milestones
+
+1. **Rotary input and real Mazda:** resolve the DHU input issue, then repeat launch, browse, select, pause, Next, Back, and reconnect using the 2021 CX-5 Commander. Use the Play-installed release for launcher verification.
+2. **Queue ownership:** disable or reconcile Morphe autoplay; detect actual video identity and completion; advance only through the selected Car Lyrics queue. Subscribe to live phone queue edits. Today Next/Previous operate on the selected list snapshot.
+3. **Playback matrix:** test several karaoke providers, videos that reject embeds, long sessions, account/region restrictions, portrait videos, buffering, app switching, and locking. Capture quantitative A/V latency and recovery results. Do not promise all YouTube content.
+4. **Larger lyrics:** preserve video edges; test optional user-controlled framing and the host's visible-area changes. The app cannot independently remove Android Auto's split-screen Maps panel.
+5. **Morphe extension only if needed:** a version-specific Morphe patch could expose video ID, duration, position, seek, completion, fullscreen, and queue events directly. Start with a small explicit bridge rather than porting the entire patched APK. This is not implemented in 0.4.0.
+
+The existing mirror is the shortest working route to the user's installed player. A Morphe APK fork remains a maintenance-heavy alternative: the project supplies patches for specific YouTube APK versions, not the full YouTube source tree.
+
+## Sources
+
+- [Morphe patches](https://github.com/MorpheApp/morphe-patches)
+- [Android MediaProjection lifecycle and consent](https://developer.android.com/media/grow/media-projection)
+- [MediaSessionManager access](https://developer.android.com/reference/android/media/session/MediaSessionManager)
+- [Android Auto desktop head unit](https://developer.android.com/training/cars/testing/dhu)
+- [Drawing on car surfaces](https://developer.android.com/training/cars/apps/library/draw-maps)
