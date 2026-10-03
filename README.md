@@ -51,7 +51,7 @@ Pixel 7a running Android 17, Morphe YouTube 21.04.223, Car Lyrics **0.4.0 (13)**
 - Audio reaches the DHU stream (a short isolated stream recording measured nonzero audio after raising its test volume).
 - Eleven unit tests pass, including media-session targeting, real playback status, phone display launch, and existing browse/queue flows. Signed release APK and AAB build successfully.
 
-**Remaining verification:** physical Mazda display and Commander knob, real cabin microphone recognition, and measured audio/video synchronization. Rotary commands did not move focus reliably in this DHU session; touch interaction worked. The 800×480 host grants the full app area. The 1280×720 host keeps a Maps side panel; the app cannot force that host layout away. Video is aspect-fitted, preserving the lyric edges.
+**Remaining verification:** physical Mazda display and Commander knob, real cabin microphone recognition, and measured audio/video synchronization. Rotary commands did not move focus reliably in the October 2 DHU session; the October 3 profile below corrects its input mode. The 800×480 host grants the full app area. The normal POI build keeps a Maps side panel on the wider host. Video is aspect-fitted, preserving the lyric edges.
 
 This uses a POI custom surface as a private experiment. DHU success does not establish public Play eligibility or compatibility with every Android Auto head unit.
 
@@ -83,6 +83,27 @@ LD_LIBRARY_PATH=/tmp/dhu-libs/usr/lib:$ANDROID_HOME/extras/google/auto \
   --adb=localhost:5277 --config=tools/dhu-mazda.ini
 ```
 
-`tools/dhu-mazda.ini` requests an 800×480 rotary-only head unit. For touch diagnostics, copy it and change `touch = true`. DHU tap coordinates follow the displayed desktop window dimensions, so do not reuse coordinates blindly between layouts. Check the desktop mixer: a zero-volume DHU stream can make functioning playback appear silent.
+`tools/dhu-mazda.ini` targets **1280×480 with rotary input**, using a 1280×720 transport with 240 pixels of vertical margins. This is the working target for the factory 10.25-inch 2021 CX-5 display; exact pixel geometry and density still need confirmation from this car. Mazda's US specifications confirm the display size, not its pixel resolution. Logical DPI 160 and physical DPI 133 are test assumptions. `tools/dhu-compact.ini` preserves the older 800×480 test option.
+
+For touch diagnostics, copy the profile and set `inputmode = hybrid` and `touch = true`. DHU screenshots retain the 720-pixel transport height, with the active screen between y=120 and y=600; `cropmargins = true` crops the desktop window. Tap coordinates follow the current desktop window dimensions. For rotary testing, use `dpad rotate right/left`, then `keycode dpad_center down` and `keycode dpad_center up` with a short delay between them. Instant `dpad click` was unreliable for playback actions in this DHU build. Check the desktop mixer if functioning playback appears silent.
+
+## Full-width local experiment — October 3, 2026
+
+The `fullscreenProbe` build uses Android Auto's navigation host and an empty navigation overlay. In the 1280×480 DHU test, opening Car Lyrics from the app launcher expanded its surface from **770×460 to 1190×460**, removed the side panel, and displayed actual Morphe video without the large playback-status pane. The Android Auto rail remains visible. Selecting the dashboard view can still show a second card; reopen the app from the launcher for the expanded view.
+
+This is a **local experiment**, labeled **Car Lyrics Wide Probe**. Karaoke is not a navigation app, so this variant is not suitable for Play submission. The ordinary release remains POI. Neither this result nor the existing POI prototype establishes public Play eligibility or physical Mazda compatibility. Both still use screen sharing; this is separate from the native Morphe backend investigation.
+
+```sh
+./gradlew :app:assembleFullscreenProbe
+adb install -r app/build/outputs/apk/fullscreenProbe/app-fullscreenProbe.apk
+```
+
+The probe uses the same package, version code, and configured release signing key, replacing the local app while preserving its saved data. Signature compatibility with a Play-installed copy depends on Play App Signing configuration. Restart DHU/Android Auto after replacement and grant fresh Morphe sharing consent. Restore the standard build with `adb install -r app/build/outputs/apk/release/app-release.apk`; no uninstall is needed on the tested Pixel.
+
+Video remains aspect-fitted: filling this very wide screen edge to edge would crop the top/bottom of ordinary karaoke videos. The four transport/browse buttons remain available through rotary focus; automatic hiding was not observed. A second session with touch disabled verified list selection, video rendering after reconnect, song changes, pause, and Back to browsing. Pause/resume was also checked in the hybrid diagnostic session. Twenty unit tests pass, and both the probe APK and standard release APK/AAB build successfully. Physical Mazda testing and measured A/V synchronization remain outstanding.
+
+[Wide browse screenshot](docs/images/mazda-wide-browse.png) · [Wide Morphe video screenshot](docs/images/mazda-wide-video.png)
+
+References: [Mazda 2021 CX-5 specifications](https://news.mazdausa.com/vehicles-2021-cx-5), [DHU display and input configuration](https://developer.android.com/training/cars/testing/dhu), [NavigationTemplate](https://developer.android.com/reference/androidx/car/app/navigation/model/NavigationTemplate).
 
 See [Morphe implementation and follow-up plan](docs/MORPHE_ANDROID_AUTO.md). Older Spotify research is retained in [docs/PLAN.md](docs/PLAN.md).

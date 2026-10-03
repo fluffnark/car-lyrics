@@ -2,6 +2,10 @@
 
 Updated October 2, 2026. This replaces the earlier hypothesis-only investigation: **the installed Morphe app's actual video has now been rendered on the desktop Android Auto head unit.** Physical Mazda testing remains outstanding.
 
+**October 3 wide-display follow-up:** the Mazda test profile now uses a 1280×480 active display and explicit rotary input mode. This is a working assumption for the factory 10.25-inch screen; this car's exact geometry/DPI is unconfirmed. The normal POI app receives 770×460. A separate `fullscreenProbe` build declaring NAVIGATION receives **1190×460** when opened from the launcher. Actual Morphe video renders there using `NavigationTemplate` with no status pane; Android Auto's sidebar and compact transport buttons remain. Opening the dashboard can still show a companion card. This category is only a local experiment and is not a valid karaoke classification for Play. The standard release stays POI. See [build/restore instructions and screenshots](../README.md#full-width-local-experiment--october-3-2026).
+
+The wide test exercised rotary list focus/selection and explicit center-key press/release for pause/resume. A second session with touch disabled confirmed video after reconnect, song changes, pause, and Back to browsing. Instant DHU `dpad click` was unreliable for the playback buttons. Twenty unit tests pass; signed probe APK and standard release APK/AAB build. These results supersede the earlier rotary configuration finding below. Automatic control hiding, physical Mazda behavior, and measured A/V offset remain unverified. One stale browse surface rejected EGL attachment when sharing first started; selecting playback supplied a fresh surface and video recovered without repeating consent.
+
 **Native alternative investigated:** a separate shell-hosted trusted display successfully ran the installed Morphe app without MediaProjection on the Pixel, including URL song changes. See [native Morphe findings and prototype](MORPHE_NATIVE.md). That backend is not integrated into the current Car Lyrics release yet.
 
 ## Current implementation
@@ -42,10 +46,10 @@ A screenshot of a valid surface or a PLAYING media state alone is not proof of v
 
 ## Next milestones
 
-1. **Rotary input and real Mazda:** resolve the DHU input issue, then repeat launch, browse, select, pause, Next, Back, and reconnect using the 2021 CX-5 Commander. Use the Play-installed release for launcher verification.
+1. **Rotary input and real Mazda:** repeat launch, browse, select, pause, Next, Back, and reconnect using the 2021 CX-5 Commander. The updated DHU input profile resolves rotary list focus; physical testing is still required. Use the Play-installed release for launcher verification.
 2. **Queue ownership:** disable or reconcile Morphe autoplay; detect actual video identity and completion; advance only through the selected Car Lyrics queue. Subscribe to live phone queue edits. Today Next/Previous operate on the selected list snapshot.
 3. **Playback matrix:** test several karaoke providers, videos that reject embeds, long sessions, account/region restrictions, portrait videos, buffering, app switching, and locking. Capture quantitative A/V latency and recovery results. Do not promise all YouTube content.
-4. **Larger lyrics:** preserve video edges; test optional user-controlled framing and the host's visible-area changes. The app cannot independently remove Android Auto's split-screen Maps panel.
+4. **Larger lyrics:** preserve video edges and verify the wide layout on the actual Mazda. The standard POI app cannot independently remove the host's side panel. The October 3 navigation-host experiment expands the app, but its category is unsuitable for a public karaoke release.
 5. **Morphe extension only if needed:** a version-specific Morphe patch could expose video ID, duration, position, seek, completion, fullscreen, and queue events directly. Start with a small explicit bridge rather than porting the entire patched APK. This is not implemented in 0.4.0.
 
 The existing mirror remains the implemented Android Auto backend. The native investigation now recommends testing a Shizuku display host before an APK fork. A Morphe fork remains a maintenance-heavy alternative: the project supplies patches for specific YouTube APK versions, not the full YouTube source tree.

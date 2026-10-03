@@ -17,6 +17,7 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.MapWithContentTemplate
+import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -32,6 +33,7 @@ class CarLyricsScreen(
     ) MorpheScreenShare(context) else YouTubeSurface(context),
     private val saved: SavedVideos = SavedVideos(context),
     remoteSearch: VideoSearch = YouTubeSearch,
+    private val fullscreenHost: Boolean = BuildConfig.FULLSCREEN_HOST,
 ) : Screen(context), DefaultLifecycleObserver {
     private enum class Source { RECENT, SAVED }
     private enum class Mode { BROWSE, SEARCH, SEARCH_RESULTS, COLLECTIONS, QUEUE, PLAYLISTS, PLAYLIST, PLAYER }
@@ -313,15 +315,21 @@ class CarLyricsScreen(
                         androidx.car.app.CarToast.makeText(carContext, "Open Car Lyrics on your phone to start sharing", androidx.car.app.CarToast.LENGTH_LONG).show()
                     }
                 }.build())
+            val controls = ActionStrip.Builder()
+                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_previous)).setOnClickListener { step(-1) }.build())
+                .addAction(compactPlayback)
+                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_next)).setOnClickListener { step(1) }.build())
+                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_browse))
+                    .setOnClickListener { browse() }.build()).build()
+            // Only the explicit local experiment declares NAVIGATION. Its empty
+            // navigation overlay leaves video unobscured; the host owns the rail
+            // and when the knob-accessible transport buttons hide/reappear.
+            if (fullscreenHost && player.statusDetail == null) {
+                return NavigationTemplate.Builder().setActionStrip(controls).build()
+            }
             return MapWithContentTemplate.Builder()
                 .setContentTemplate(PaneTemplate.Builder(compactPane.build()).build())
-                .setActionStrip(ActionStrip.Builder()
-                    .addAction(Action.Builder().setIcon(icon(R.drawable.ic_previous)).setOnClickListener { step(-1) }.build())
-                    .addAction(compactPlayback)
-                    .addAction(Action.Builder().setIcon(icon(R.drawable.ic_next)).setOnClickListener { step(1) }.build())
-                    .addAction(Action.Builder().setIcon(icon(R.drawable.ic_browse))
-                        .setOnClickListener { browse() }.build()).build())
-                .build()
+                .setActionStrip(controls).build()
         }
         val savedAction = Action.Builder()
             .setTitle(if (current != null && playlists.contains("My karaoke mix", current.id)) "In mix" else "Add to mix")

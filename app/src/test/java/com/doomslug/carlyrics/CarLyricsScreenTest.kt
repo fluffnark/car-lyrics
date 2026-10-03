@@ -148,6 +148,32 @@ class CarLyricsScreenTest {
         override fun refresh(done: () -> Unit) = done()
     }
 
+    @Test fun fullscreenProbeHasNoStatusPaneAndKeepsKnobTransportAndBrowse() {
+        val context = TestCarContext.createCarContext(app)
+        var pauses = 0
+        val player = object : VideoPlayer {
+            override val compactControls = true
+            override var onStatus: ((PlaybackStatus) -> Unit)? = null
+            override fun select(video: KaraokeVideo) {}
+            override fun pause() { pauses++ }
+            override fun resume() {}
+            override fun hide() {}
+            override fun close() {}
+        }
+        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context), fullscreenHost = true)
+        val song = (screen.onGetTemplate() as ListTemplate).singleList!!.items
+            .first { (it as Row).title.toString().startsWith("Song") } as Row
+        song.onClickDelegate!!.sendClick(done)
+        player.onStatus!!.invoke(PlaybackStatus.PLAYING)
+        val full = screen.onGetTemplate() as androidx.car.app.navigation.model.NavigationTemplate
+        assertNull(full.navigationInfo)
+        assertEquals(4, full.actionStrip!!.actions.size)
+        full.actionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
+        assertEquals(1, pauses)
+        full.actionStrip!!.actions[3].onClickDelegate!!.sendClick(done)
+        assertTrue(screen.onGetTemplate() is ListTemplate)
+    }
+
     private class FakePlayer : VideoPlayer {
         override var onStatus: ((PlaybackStatus) -> Unit)? = null
         var selected: KaraokeVideo? = null

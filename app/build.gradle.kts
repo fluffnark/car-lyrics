@@ -8,12 +8,15 @@ plugins {
 android {
     namespace = "com.doomslug.carlyrics"
     compileSdk = 36
+    buildFeatures { buildConfig = true }
     defaultConfig {
         applicationId = "com.doomslug.carlyrics"
         minSdk = 29
         targetSdk = 36
         versionCode = 14
         versionName = "0.4.1"
+        manifestPlaceholders["carAppCategory"] = "androidx.car.app.category.POI"
+        buildConfigField("boolean", "FULLSCREEN_HOST", "false")
     }
     signingConfigs {
         val signingFile = rootProject.file("signing/keystore.properties")
@@ -28,6 +31,19 @@ android {
         }
     }
     buildTypes {
+        // Private DHU experiment: navigation hosting can receive a wider surface.
+        // This category does not describe karaoke and is not for a Play upload.
+        create("fullscreenProbe") {
+            initWith(getByName("debug"))
+            // Same package/upload signature preserves this phone's test-track identity and data.
+            if (rootProject.file("signing/keystore.properties").exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            versionNameSuffix = "-fullscreen-probe"
+            matchingFallbacks += "debug"
+            manifestPlaceholders["carAppCategory"] = "androidx.car.app.category.NAVIGATION"
+            buildConfigField("boolean", "FULLSCREEN_HOST", "true")
+        }
         release {
             isMinifyEnabled = false
             if (rootProject.file("signing/keystore.properties").exists()) {
