@@ -32,6 +32,7 @@ flowchart LR
 | Browse and surface replacement | Capture continues; renderer reattaches without fresh consent |
 | Audio | Isolated DHU stream contained audio after correcting test mixer volume; measured peak −32.6 dBFS in a short sample |
 | Rotary-only DHU | Focus did not respond reliably to CLI rotary commands; unresolved |
+| Complete song | 3:54 karaoke video reached ENDED; Morphe subsequently autoplayed its own recommendation |
 | Unit tests | 11 passed |
 | Physical Mazda / measured A/V offset / voice | Not verified |
 

@@ -22,6 +22,7 @@ Lyrics are the text baked into each karaoke video. Availability depends on wheth
 Pixel 7a running Android 17, Morphe YouTube 21.04.223, Car Lyrics **0.4.0 (13)**:
 
 - Actual Morphe video and karaoke lyrics rendered in Android Auto Desktop Head Unit (DHU), at 1280×720 and 800×480.
+- A complete 3:54 karaoke video remained visible through its ending; Morphe then autoplayed its own recommendation, confirming the queue-ownership follow-up.
 - Car selections open Morphe on the phone; Pause/Play and manual Next control Morphe specifically.
 - Capture survives browsing and DHU surface replacement/reconnection without reusing the consent token.
 - Audio reaches the DHU stream (a short isolated stream recording measured nonzero audio after raising its test volume).
