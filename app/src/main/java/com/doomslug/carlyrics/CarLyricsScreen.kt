@@ -4,6 +4,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
+import androidx.car.app.constraints.ConstraintManager
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarIcon
@@ -30,22 +31,33 @@ class CarLyricsScreen(
         context.getSharedPreferences("car_lyrics", 0).getBoolean("morphe_mirror_enabled", true)
     ) MorpheScreenShare(context) else YouTubeSurface(context),
     private val saved: SavedVideos = SavedVideos(context),
+    remoteSearch: VideoSearch = YouTubeSearch,
 ) : Screen(context), DefaultLifecycleObserver {
     private enum class Source { RECENT, SAVED }
-    private enum class Mode { BROWSE, SEARCH, COLLECTIONS, QUEUE, PLAYLISTS, PLAYLIST, PLAYER }
+    private enum class Mode { BROWSE, SEARCH, SEARCH_RESULTS, COLLECTIONS, QUEUE, PLAYLISTS, PLAYLIST, PLAYER }
     private var source = Source.RECENT
     private var mode = Mode.BROWSE
     private var page = 0
     private var queue = emptyList<KaraokeVideo>()
     private var selected = -1
-    private var searchQuery = ""
     private var activeCollection: KaraokeCollection? = null
     private val playlists = PlaylistStore(context)
     private val queueStore = QueueStore(context)
+    private val search = VideoSearchSession(
+        localVideos = {
+            if (catalog === SingKingCatalog) SingKingCatalog.library + catalog.videos + saved.all() + queueStore.all()
+            else catalog.videos
+        },
+        remote = remoteSearch,
+        changed = {
+            Log.i("CarLyricsSearch", "results changed mode=$mode lifecycle=${lifecycle.currentState}")
+            if (mode == Mode.SEARCH || mode == Mode.SEARCH_RESULTS) invalidate()
+        },
+    )
     private var activePlaylist: KaraokePlaylist? = null
     private var playback = PlaybackStatus.IDLE
     private val back = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() { browse() }
+        override fun handleOnBackPressed() { if (mode == Mode.SEARCH_RESULTS) openSearch() else browse() }
     }
     init {
         lifecycle.addObserver(this)
@@ -67,13 +79,15 @@ class CarLyricsScreen(
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        Log.i("CarLyricsSearch", "screen stopped mode=$mode")
+        search.cancel()
         player.hide()
         mode = Mode.BROWSE
         back.isEnabled = false
         playback = PlaybackStatus.IDLE
     }
 
-    override fun onDestroy(owner: LifecycleOwner) { player.close() }
+    override fun onDestroy(owner: LifecycleOwner) { search.close(); player.close() }
 
     override fun onGetTemplate(): Template {
         // Register once in onStart. Registering on every status/template update
@@ -81,6 +95,7 @@ class CarLyricsScreen(
         return when (mode) {
         Mode.BROWSE -> browseTemplate()
         Mode.SEARCH -> searchTemplate()
+        Mode.SEARCH_RESULTS -> searchResultsTemplate()
         Mode.COLLECTIONS -> collectionsTemplate()
         Mode.QUEUE -> queueTemplate()
         Mode.PLAYLISTS -> playlistsTemplate()
@@ -97,6 +112,9 @@ class CarLyricsScreen(
     private fun browseTemplate(): Template {
         val videos = currentVideos()
         val list = ItemList.Builder()
+        if (page == 0) list.addItem(Row.Builder().setTitle("Search YouTube")
+            .addText("Say a song or artist • all providers")
+            .setOnClickListener { openSearch() }.build())
         if (videos.isEmpty()) {
             list.addItem(Row.Builder().setTitle(when {
                 source == Source.SAVED -> "No saved songs yet"
@@ -152,27 +170,58 @@ class CarLyricsScreen(
             .setStartHeaderAction(Action.APP_ICON)
             .addEndHeaderAction(switch)
             .build()
-        val actions = ActionStrip.Builder()
-            .addAction(Action.Builder().setTitle("Search").setOnClickListener { openSearch() }.build())
-            .build()
-        return ListTemplate.Builder().setHeader(header).setSingleList(list.build()).setActionStrip(actions).build()
+        return ListTemplate.Builder().setHeader(header).setSingleList(list.build()).build()
+    }
+
+    private fun searchItems(): ItemList {
+        val matches = search.videos.toList()
+        val limit = carContext.getCarService(ConstraintManager::class.java)
+            .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST).coerceIn(1, 30)
+        val list = ItemList.Builder().setNoItemsMessage(if (search.query.isBlank())
+            "Use the microphone to say a song, artist, or provider" else "No results. Try the song and artist, or another provider.")
+        if (search.error != null) list.addItem(Row.Builder().setTitle("Retry YouTube search")
+            .addText(search.error!!).setOnClickListener {
+                search.update(search.query, submitted = true, retry = true)
+            }.build())
+        matches.take(limit - if (search.error != null) 1 else 0).forEachIndexed { index, video ->
+            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("YouTube • select to play")
+                .setOnClickListener { select(matches, index) }.build())
+        }
+        return list.build()
+    }
+
+    private fun searchResultsTemplate(): Template {
+        val header = Header.Builder().setTitle(search.query.take(64))
+            .setStartHeaderAction(Action.BACK)
+            .addEndHeaderAction(Action.Builder().setTitle("Search again")
+                .setOnClickListener { openSearch() }.build()).build()
+        val builder = ListTemplate.Builder().setHeader(header)
+        if (search.loading && search.videos.isEmpty()) builder.setLoading(true)
+        else builder.setSingleList(searchItems())
+        return builder.build()
     }
 
     private fun searchTemplate(): Template {
-        val matches = searchResults(searchQuery)
-        val list = ItemList.Builder().setNoItemsMessage(if (searchQuery.isBlank()) "Type or say a song, artist, album, or genre" else "No matching karaoke videos")
-        matches.take(30).forEach { video ->
-            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("Sing King • karaoke")
-                .setOnClickListener { select(matches, matches.indexOf(video)) }.build())
-        }
-        return SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
-            override fun onSearchTextChanged(searchText: String) { searchQuery = searchText; invalidate() }
-            override fun onSearchSubmitted(searchText: String) { searchQuery = searchText; invalidate() }
+        val builder = SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
+            override fun onSearchTextChanged(searchText: String) {
+                // Some hosts clear their input after closing speech recognition.
+                // Once submitted, the results screen owns the query.
+                if (mode != Mode.SEARCH) return
+                search.update(searchText)
+            }
+            override fun onSearchSubmitted(searchText: String) {
+                if (mode != Mode.SEARCH || searchText.isBlank()) return
+                mode = Mode.SEARCH_RESULTS
+                search.update(searchText, submitted = true)
+                invalidate()
+            }
         }).setSearchHint("Song, artist, album, or genre")
-            .setInitialSearchText(searchQuery)
-            .setItemList(list.build())
+            .setInitialSearchText(search.query)
+            .setShowKeyboardByDefault(false)
             .setHeaderAction(Action.APP_ICON)
-            .build()
+        if (search.loading && search.videos.isEmpty()) builder.setLoading(true)
+        else builder.setItemList(searchItems())
+        return builder.build()
     }
 
     private fun collectionsTemplate(): Template {
@@ -307,16 +356,15 @@ class CarLyricsScreen(
         return if (source == Source.RECENT) catalog.videos else saved.all()
     }
 
-    private fun searchResults(query: String): List<KaraokeVideo> {
-        if (query.isBlank()) return SingKingCatalog.library.take(30)
-        val words = query.trim().lowercase().split(Regex("\\s+")).filter { it.length > 1 }
-        return SingKingCatalog.library.filter { video -> words.all { video.title.lowercase().contains(it) } }
+    private fun openSearch() {
+        mode = Mode.SEARCH
+        back.isEnabled = true
+        search.update("", retry = true)
     }
-
-    private fun openSearch() { searchQuery = ""; mode = Mode.SEARCH; back.isEnabled = true; invalidate() }
 
     private fun select(videos: List<KaraokeVideo>, index: Int) {
         val video = videos.getOrNull(index) ?: return
+        search.cancel()
         queue = videos.toList()
         selected = index
         mode = Mode.PLAYER
@@ -336,8 +384,8 @@ class CarLyricsScreen(
 
     private fun browse() {
         player.hide()
+        search.cancel()
         mode = Mode.BROWSE
-        searchQuery = ""
         back.isEnabled = false
         playback = PlaybackStatus.IDLE
         invalidate()

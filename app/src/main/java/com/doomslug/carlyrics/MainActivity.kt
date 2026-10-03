@@ -2,12 +2,14 @@ package com.doomslug.carlyrics
 
 import android.app.Activity
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.speech.RecognizerIntent
+import android.view.inputmethod.EditorInfo
+import android.widget.Toast
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -34,9 +36,13 @@ class MainActivity : Activity() {
     private lateinit var queueStatus: TextView
     private val queueStore by lazy { QueueStore(this) }
     private val playlistStore by lazy { PlaylistStore(this) }
-    private val searchHandler = Handler(Looper.getMainLooper())
-    private var searchGeneration = 0
-    private var remoteResults = emptyList<KaraokeVideo>()
+    private lateinit var searchInput: EditText
+    private val searchSession by lazy {
+        VideoSearchSession(
+            localVideos = { SingKingCatalog.library + SingKingCatalog.videos + queueStore.all() },
+            changed = { renderPhoneResults() },
+        )
+    }
     private lateinit var morpheStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,9 +121,10 @@ class MainActivity : Activity() {
         body.addView(space(8))
         body.addView(text("Search and add songs from the phone while the car screen stays focused on playback.", 15f, muted))
         body.addView(space(10))
-        val search = EditText(this).apply {
+        searchInput = EditText(this).apply {
             hint = "Search song, artist, album, or genre"
             setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
             setTextColor(ink)
             setHintTextColor(muted)
             setPadding(dp(14), dp(10), dp(14), dp(10))
@@ -125,21 +132,23 @@ class MainActivity : Activity() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    val query = s?.toString().orEmpty()
-                    remoteResults = emptyList()
-                    renderPhoneResults(query)
-                    val generation = ++searchGeneration
-                    searchHandler.removeCallbacksAndMessages(null)
-                    if (query.trim().length >= 2) searchHandler.postDelayed({
-                        YouTubeSearch.search(query) { results ->
-                            if (generation == searchGeneration) { remoteResults = results; renderPhoneResults(query) }
-                        }
-                    }, 450L)
+                    searchSession.update(s?.toString().orEmpty())
                 }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
+            setOnEditorActionListener { _, action, _ ->
+                if (action == EditorInfo.IME_ACTION_SEARCH) {
+                    searchSession.update(text.toString(), submitted = true)
+                    true
+                } else false
+            }
         }
-        body.addView(search, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+        body.addView(searchInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+        body.addView(Button(this).apply {
+            text = "Voice search"
+            isAllCaps = false
+            setOnClickListener { startVoiceSearch() }
+        })
         body.addView(space(8))
         queueStatus = text("Queue: ${queueStore.all().size} songs • My karaoke mix: ${playlistStore.all().firstOrNull { it.name == "My karaoke mix" }?.videos?.size ?: 0}", 14f, gold)
         body.addView(queueStatus)
@@ -158,9 +167,25 @@ class MainActivity : Activity() {
         setContentView(scroll)
 
         SingKingCatalog.initialize(this)
-        renderPhoneResults("")
+        val restoredQuery = savedInstanceState?.getString("search_query").orEmpty()
+        searchInput.setText(restoredQuery)
+        searchSession.update(restoredQuery)
         updateCatalog()
         if (SingKingCatalog.videos.isEmpty() || SingKingCatalog.isStale()) SingKingCatalog.refresh { updateCatalog() }
+    }
+
+    private fun startVoiceSearch() {
+        try {
+            startActivityForResult(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Say a song, artist, or karaoke provider")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }, REQUEST_VOICE_SEARCH)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "Voice recognition isn't available. You can type your search instead.", Toast.LENGTH_LONG).show()
+        } catch (_: SecurityException) {
+            Toast.makeText(this, "Voice recognition couldn't open. Check your speech app or type your search.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun requestMorpheCapture() {
@@ -174,6 +199,19 @@ class MainActivity : Activity() {
     @Deprecated("Activity result API kept small for the development prototype")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_VOICE_SEARCH) {
+            if (resultCode != RESULT_OK) return
+            val heard = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull { it.isNotBlank() }?.trim()?.take(200)
+            if (heard == null) {
+                Toast.makeText(this, "No speech detected. Try again or type your search.", Toast.LENGTH_LONG).show()
+            } else {
+                searchInput.setText(heard)
+                searchInput.setSelection(heard.length)
+                searchSession.update(heard, submitted = true)
+            }
+            return
+        }
         if (requestCode != REQUEST_MORPHE_CAPTURE || resultCode != RESULT_OK || data == null) return
         startForegroundService(Intent(this, MorpheProjectionService::class.java).apply {
             action = MorpheProjectionService.ACTION_START
@@ -197,6 +235,16 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("search_query", searchInput.text.toString())
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onDestroy() {
+        searchSession.close()
+        super.onDestroy()
+    }
+
     private fun updateMorpheStatus() {
         if (!::morpheStatus.isInitialized) return
         morpheStatus.text = if (!MorpheMediaAccess.enabled(this))
@@ -204,19 +252,25 @@ class MainActivity : Activity() {
         else MorpheCaptureGrant.message
     }
 
-    private fun renderPhoneResults(query: String) {
+    private fun renderPhoneResults() {
         if (!::phoneResults.isInitialized) return
         phoneResults.removeAllViews()
-        val normalized = query.trim().lowercase()
-        val local = if (normalized.isBlank()) SingKingCatalog.library.take(8) else
-            SingKingCatalog.library.filter { it.title.lowercase().contains(normalized) }
-        val localIds = local.map { it.id }.toSet()
-        val source = (local + remoteResults.filter { it.id !in localIds }).take(if (normalized.isBlank()) 8 else 30)
+        val source = searchSession.videos.take(if (searchSession.query.isBlank()) 8 else 30)
+        if (searchSession.loading) phoneResults.addView(text("Searching YouTube…", 14f, gold))
+        searchSession.error?.let { error ->
+            phoneResults.addView(text(error, 14f, gold))
+            phoneResults.addView(Button(this).apply {
+                text = "Retry search"
+                isAllCaps = false
+                setOnClickListener { searchSession.update(searchSession.query, submitted = true, retry = true) }
+            })
+        }
         if (source.isEmpty()) {
-            phoneResults.addView(text(if (normalized.isBlank()) "Search YouTube for any karaoke provider." else "No matching YouTube videos yet.", 14f, muted))
+            if (!searchSession.loading && searchSession.error == null) phoneResults.addView(text(
+                if (searchSession.query.isBlank()) "Search YouTube for any karaoke provider."
+                else "No results. Try the song and artist, or another provider.", 14f, muted))
             return
         }
-        if (normalized.isNotBlank() && remoteResults.isNotEmpty()) phoneResults.addView(text("YouTube results", 13f, gold, true))
         source.forEach { video ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -228,12 +282,12 @@ class MainActivity : Activity() {
             row.addView(Button(this).apply {
                 text = if (queueStore.all().any { it.id == video.id }) "Queued" else "Queue"
                 isAllCaps = false
-                setOnClickListener { queueStore.toggle(video); updatePhoneQueueStatus(); renderPhoneResults(query) }
+                setOnClickListener { queueStore.toggle(video); updatePhoneQueueStatus(); renderPhoneResults() }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
             row.addView(Button(this).apply {
                 text = if (playlistStore.contains("My karaoke mix", video.id)) "In mix" else "Mix"
                 isAllCaps = false
-                setOnClickListener { playlistStore.toggle("My karaoke mix", video); updatePhoneQueueStatus(); renderPhoneResults(query) }
+                setOnClickListener { playlistStore.toggle("My karaoke mix", video); updatePhoneQueueStatus(); renderPhoneResults() }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
             phoneResults.addView(row)
             phoneResults.addView(space(6))
@@ -279,5 +333,8 @@ class MainActivity : Activity() {
     private fun panel(color: Int, radius: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radius).toFloat() }
     private fun dp(value: Int) = (resources.displayMetrics.density * value).toInt()
 
-    private companion object { const val REQUEST_MORPHE_CAPTURE = 4107 }
+    private companion object {
+        const val REQUEST_MORPHE_CAPTURE = 4107
+        const val REQUEST_VOICE_SEARCH = 4108
+    }
 }

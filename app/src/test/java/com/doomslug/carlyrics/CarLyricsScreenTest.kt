@@ -63,7 +63,7 @@ class CarLyricsScreenTest {
         recent.header!!.endHeaderActions.single().onClickDelegate!!.sendClick(done)
         val saved = screen.onGetTemplate() as ListTemplate
         assertEquals("Saved karaoke songs", saved.header!!.title.toString())
-        assertEquals(videos.first().title, (saved.singleList!!.items.first() as Row).title.toString())
+        assertEquals(videos.first().title, (saved.singleList!!.items[1] as Row).title.toString())
     }
 
     @Test fun paginationAndPlaybackErrorOfferUsefulActions() {
@@ -122,8 +122,9 @@ class CarLyricsScreenTest {
         val context = TestCarContext.createCarContext(app)
         val screen = CarLyricsScreen(context, FakeCatalog(videos), FakePlayer(), SavedVideos(context))
         val browse = screen.onGetTemplate() as ListTemplate
-        assertEquals("Search", browse.actionStrip!!.actions.single().title.toString())
-        browse.actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
+        val searchRow = browse.singleList!!.items.first() as Row
+        assertEquals("Search YouTube", searchRow.title.toString())
+        searchRow.onClickDelegate!!.sendClick(done)
         val search = screen.onGetTemplate() as androidx.car.app.model.SearchTemplate
         assertEquals("Song, artist, album, or genre", search.searchHint)
     }

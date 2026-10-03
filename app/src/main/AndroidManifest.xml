@@ -5,7 +5,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
     <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
-    <queries><package android:name="app.morphe.android.youtube" /></queries>
+    <queries>
+        <package android:name="app.morphe.android.youtube" />
+        <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
+    </queries>
     <application android:allowBackup="false" android:appCategory="maps" android:label="Car Lyrics" android:icon="@drawable/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

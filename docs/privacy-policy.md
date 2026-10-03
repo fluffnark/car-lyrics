@@ -1,6 +1,6 @@
 # Car Lyrics Privacy Policy
 
-**Effective date: October 2, 2026**
+**Effective date: October 3, 2026**
 
 Car Lyrics is a private Android Auto prototype developed by Caleb Cheng ("we", "us", or "our"). This policy explains what the app does with information when you use it.
 
@@ -20,6 +20,10 @@ Car Lyrics connects to the internet to load public karaoke video listings and to
 - [YouTube Terms of Service](https://www.youtube.com/t/terms)
 
 Car Lyrics does not receive or store your YouTube password, Google password, or YouTube account credentials.
+
+## Voice and text search
+
+Voice recognition is provided by Android Auto or the speech service installed on your phone. That provider may process audio under its own privacy policy. Car Lyrics receives the recognized words, not the microphone recording, and sends your search text to YouTube to retrieve public video results. Car Lyrics does not record microphone audio, operate a speech server, or upload searches to us.
 
 ## Screen sharing and playback controls
 

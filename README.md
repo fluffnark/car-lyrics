@@ -13,9 +13,32 @@ Morphe owns both video playback and audio. Car Lyrics captures video frames only
 
 ## Karaoke library and queues
 
-The car has Sing King recent uploads, a local index of 5,000 titles, title search, and curated collections. The phone searches public YouTube results from other providers too. **Queue** and **Mix** on phone results save videos locally; open Queue or Playlists on the car to select them. Next/Previous follow the list selected in Car Lyrics. Automatic queue advancement and reconciling Morphe's own autoplay are still unfinished. Live phone additions do not yet update an already selected playback list.
+The car has Sing King recent uploads, a local index of 5,000 titles, curated collections, and public YouTube search across providers. Car and phone search both accept song, artist, album, genre, and provider names. **Queue** and **Mix** on phone results save videos locally; open Queue or Playlists on the car to select them. Next/Previous follow the list selected in Car Lyrics. Automatic queue advancement and reconciling Morphe's own autoplay are still unfinished. Live phone additions do not yet update an already selected playback list.
 
 Lyrics are the text baked into each karaoke video. Availability depends on whether Morphe can play that video for your account and region; this is not a guarantee that every YouTube upload is accessible. The old embedded player is retained in source, but new installations default to Morphe.
+
+## Voice search
+
+On the car: **Search YouTube → microphone in the search field → say a song and artist → select a result**. For example, say “Queen Bohemian Rhapsody karaoke” or “find karaoke for Halo by Beyoncé.” Include “karaoke” to favor instrumental versions. Results use normal Android Auto rows; selecting one goes through the existing Morphe playback controls. This is the microphone inside Car Lyrics search, not a global “Hey Google, play in Car Lyrics” integration.
+
+On the phone: scroll to **Passenger Queue → Voice search**, speak, then use **Queue** or **Mix** beside a result. Typing and the keyboard Search key work too. Canceling recognition leaves the existing query alone. Android Auto/the phone speech provider handles audio; Car Lyrics receives the transcript. See the [privacy policy](docs/privacy-policy.md).
+
+Local matching tolerates accents, punctuation, and common spoken commands. Library filtering runs off the UI thread, typing is debounced, and old responses cannot replace a newer search. If YouTube search fails, matching local songs remain available with a Retry action. Public YouTube page parsing may need maintenance when YouTube changes its response format.
+
+## Voice release verified on October 3, 2026
+
+Car Lyrics **0.4.1 (14)** installed on the Pixel 7a:
+
+- DHU microphone WAV input recognized “Queen Bohemian Rhapsody karaoke”; live YouTube results included Sing King and KaraFun. Selecting KaraFun opened the correct video in Morphe and rendered it in the car player; Morphe reported PLAYING with matching metadata.
+- Repeating the car search with “Beyonce Halo karaoke” produced matching results from multiple providers; selecting Musisi Karaoke opened its matching Halo video. The first search's results did not overwrite the second.
+- The phone returned live YouTube results for the Queen query. Its Voice search button opened system recognition, and canceling returned to the unchanged query. Actual phone-microphone transcription has not been tested.
+- Nineteen unit tests pass, including interim speech bursts, background local filtering, late responses, network fallback/retry, parser correctness, and submitted speech → result → player selection. Signed APK and AAB builds pass.
+
+The test harness uses recorded synthetic speech with the DHU's `mic play`, not a real Mazda microphone. Restart Android Auto/DHU after reinstalling the app: this host retained dead speech callbacks across APK replacements. DHU tap coordinates also changed when the desktop resized its window; calculate them from the current window size.
+
+The current screen-sharing backend can blank car video while Morphe is hidden by the passenger phone app, even while audio continues. Independent phone browsing plus uninterrupted car video remains a native-backend acceptance gate; see [the native Morphe plan](docs/MORPHE_NATIVE.md).
+
+[Voice results](docs/images/voice-search-results.png) · [Selected Morphe video](docs/images/voice-search-video.png)
 
 ## Verified on October 2, 2026
 
@@ -28,7 +51,7 @@ Pixel 7a running Android 17, Morphe YouTube 21.04.223, Car Lyrics **0.4.0 (13)**
 - Audio reaches the DHU stream (a short isolated stream recording measured nonzero audio after raising its test volume).
 - Eleven unit tests pass, including media-session targeting, real playback status, phone display launch, and existing browse/queue flows. Signed release APK and AAB build successfully.
 
-**Remaining verification:** physical Mazda display and Commander knob, voice search, and measured audio/video synchronization. Rotary commands did not move focus reliably in this DHU session; touch interaction worked. The 800×480 host grants the full app area. The 1280×720 host keeps a Maps side panel; the app cannot force that host layout away. Video is aspect-fitted, preserving the lyric edges.
+**Remaining verification:** physical Mazda display and Commander knob, real cabin microphone recognition, and measured audio/video synchronization. Rotary commands did not move focus reliably in this DHU session; touch interaction worked. The 800×480 host grants the full app area. The 1280×720 host keeps a Maps side panel; the app cannot force that host layout away. Video is aspect-fitted, preserving the lyric edges.
 
 This uses a POI custom surface as a private experiment. DHU success does not establish public Play eligibility or compatibility with every Android Auto head unit.
 
@@ -45,7 +68,7 @@ ANDROID_HOME=/home/doomslug/.local/share/mise/installs/android-sdk/23.0 \
 Outputs:
 
 - `app/build/outputs/apk/release/app-release.apk` — locally installed prototype.
-- `app/build/outputs/bundle/release/app-release.aab` — version code 13, signed release bundle for the existing Play internal track.
+- `app/build/outputs/bundle/release/app-release.aab` — version code 14 (0.4.1), signed release bundle for the existing Play internal track.
 
 The upload key is configured in ignored `signing/keystore.properties`; keep the key and credentials private and backed up. The local ADB install is suitable for DHU testing. Use the Play internal-track installation for the Mazda launcher test, as previously configured.
 
