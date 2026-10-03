@@ -2,6 +2,8 @@
 
 Investigated October 2, 2026. **A native-display proof of concept worked on the connected Pixel 7a.** The installed Morphe app played karaoke video on a separate display, with no MediaProjection active. This is a separate research APK; Car Lyrics 0.4.x still uses its existing screen-sharing implementation. Native rendering on the Android Auto DHU and physical Mazda has not yet been tested.
 
+**Shizuku setup, October 3:** installed the signed APK from [the official v13.6.0 release](https://github.com/RikkaApps/Shizuku/releases/tag/v13.6.0) on the Pixel 7a and started its packaged `libshizuku.so` through USB ADB. The manager reports “Shizuku is running”; `shizuku_server` runs as shell UID 2000. No applications are authorized yet, and Car Lyrics still needs the user-service integration below. This USB startup must be repeated after reboot; wireless pairing/autostart was not configured. For this release, use **Shizuku → Start by connecting to a computer → View command** for the current startup command; the older website's `start.sh` path is absent from this installation.
+
 ## Recommendation
 
 Build a **Shizuku-backed native display host** for Car Lyrics. Keep the installed Morphe APK, its playback engine, and its account data. A helper running with the user's authorized ADB shell privileges creates a private trusted virtual display and launches Morphe's normal URL Activity on it. That display renders into a Surface supplied by Car Lyrics.
@@ -40,7 +42,8 @@ Environment: Pixel 7a, Android 17/API 37; installed `app.morphe.android.youtube`
 | Pause / resume using media keys | Morphe state changed to PAUSED and back to PLAYING |
 | Capture state during native tests | `dumpsys media_projection` reported `null` |
 | Separate-process MediaPlayer writes to a Binder-delivered Surface | Synthetic video rendered without projection; supports surface transport feasibility |
-| Shizuku installation / authorization / actual user-service integration | Not tested |
+| Shizuku installation and startup | Official v13.6.0 installed; running as shell on October 3 |
+| Shizuku app authorization / actual user-service integration | Not implemented; zero authorized applications |
 | Native backend on DHU / 2021 Mazda / Commander knob | Not tested |
 | Native-backend audio routing and measured A/V synchronization | Not measured in this experiment |
 
