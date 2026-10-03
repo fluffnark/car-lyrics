@@ -2,7 +2,9 @@
 
 Investigated October 2, 2026. **A native-display proof of concept worked on the connected Pixel 7a.** The installed Morphe app played karaoke video on a separate display, with no MediaProjection active. This is a separate research APK; Car Lyrics 0.4.x still uses its existing screen-sharing implementation. Native rendering on the Android Auto DHU and physical Mazda has not yet been tested.
 
-**Shizuku setup, October 3:** installed the signed APK from [the official v13.6.0 release](https://github.com/RikkaApps/Shizuku/releases/tag/v13.6.0) on the Pixel 7a and started its packaged `libshizuku.so` through USB ADB. The manager reports “Shizuku is running”; `shizuku_server` runs as shell UID 2000. No applications are authorized yet, and Car Lyrics still needs the user-service integration below. This USB startup must be repeated after reboot; wireless pairing/autostart was not configured. For this release, use **Shizuku → Start by connecting to a computer → View command** for the current startup command; the older website's `start.sh` path is absent from this installation.
+**Shizuku setup, October 3:** installed the signed APK from [the official v13.6.0 release](https://github.com/RikkaApps/Shizuku/releases/tag/v13.6.0) on the Pixel 7a. After the user's reboot, paired Shizuku with Android wireless debugging and successfully started it using its own **Start** button. The manager reports “Shizuku is running”; `shizuku_server` runs as shell UID 2000. The current Wi-Fi network is allowed for wireless debugging. Start-on-boot is enabled and `WRITE_SECURE_SETTINGS` is granted; another actual reboot has not yet verified automatic startup. This release supports non-root startup on Android 13+ when connected to an allowed Wi-Fi network, although the settings label still says “root.” If needed, open Shizuku and tap **Start** under wireless debugging.
+
+Pairing's notification did not appear despite notifications being enabled, and its short foreground service timed out. A temporary shell-owned display exposed Shizuku's built-in alternate pairing dialog; entering Android's pairing code there succeeded. Shizuku was returned to the normal phone screen, and the temporary display/helper and pairing-code file were removed. No applications are authorized yet; Car Lyrics still needs the user-service integration below. USB startup remains a fallback: use **Shizuku → Start by connecting to a computer → View command** for this release's `libshizuku.so` command; the older website's `start.sh` path is absent from this installation.
 
 ## Recommendation
 
@@ -42,7 +44,8 @@ Environment: Pixel 7a, Android 17/API 37; installed `app.morphe.android.youtube`
 | Pause / resume using media keys | Morphe state changed to PAUSED and back to PLAYING |
 | Capture state during native tests | `dumpsys media_projection` reported `null` |
 | Separate-process MediaPlayer writes to a Binder-delivered Surface | Synthetic video rendered without projection; supports surface transport feasibility |
-| Shizuku installation and startup | Official v13.6.0 installed; running as shell on October 3 |
+| Shizuku installation and startup | Official v13.6.0 installed; wireless pairing and in-app Start verified after reboot, running as shell |
+| Shizuku automatic startup | Enabled with required permission; next physical reboot still needs verification |
 | Shizuku app authorization / actual user-service integration | Not implemented; zero authorized applications |
 | Native backend on DHU / 2021 Mazda / Commander knob | Not tested |
 | Native-backend audio routing and measured A/V synchronization | Not measured in this experiment |
