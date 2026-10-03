@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries><package android:name="app.morphe.android.youtube" /></queries>
+    <application android:label="Native display probe" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false">
+        <activity android:name=".ProbeActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".PlainActivity" android:exported="false" android:resizeableActivity="true" android:taskAffinity="com.doomslug.carlyrics.displayprobe.plain" />
+        <activity android:name=".EmbeddedActivity" android:exported="false" android:allowEmbedded="true" android:resizeableActivity="true" android:taskAffinity="com.doomslug.carlyrics.displayprobe.embedded" />
+        <service android:name=".NativeVideoService" android:exported="false" android:process=":native_player" />
+        <provider android:name=".SurfaceProvider" android:authorities="com.doomslug.carlyrics.displayprobe.surface" android:exported="true" />
+    </application>
+</manifest>

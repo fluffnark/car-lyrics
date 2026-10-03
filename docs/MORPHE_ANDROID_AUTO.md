@@ -2,6 +2,8 @@
 
 Updated October 2, 2026. This replaces the earlier hypothesis-only investigation: **the installed Morphe app's actual video has now been rendered on the desktop Android Auto head unit.** Physical Mazda testing remains outstanding.
 
+**Native alternative investigated:** a separate shell-hosted trusted display successfully ran the installed Morphe app without MediaProjection on the Pixel, including URL song changes. See [native Morphe findings and prototype](MORPHE_NATIVE.md). That backend is not integrated into the current Car Lyrics release yet.
+
 ## Current implementation
 
 ```mermaid
@@ -46,7 +48,7 @@ A screenshot of a valid surface or a PLAYING media state alone is not proof of v
 4. **Larger lyrics:** preserve video edges; test optional user-controlled framing and the host's visible-area changes. The app cannot independently remove Android Auto's split-screen Maps panel.
 5. **Morphe extension only if needed:** a version-specific Morphe patch could expose video ID, duration, position, seek, completion, fullscreen, and queue events directly. Start with a small explicit bridge rather than porting the entire patched APK. This is not implemented in 0.4.0.
 
-The existing mirror is the shortest working route to the user's installed player. A Morphe APK fork remains a maintenance-heavy alternative: the project supplies patches for specific YouTube APK versions, not the full YouTube source tree.
+The existing mirror remains the implemented Android Auto backend. The native investigation now recommends testing a Shizuku display host before an APK fork. A Morphe fork remains a maintenance-heavy alternative: the project supplies patches for specific YouTube APK versions, not the full YouTube source tree.
 
 ## Sources
 

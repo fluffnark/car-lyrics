@@ -1,0 +1,5 @@
+/.gradle/
+/build/
+/local.properties
+/probe-debug.keystore
+/src/main/res/raw/native_probe.mp4
