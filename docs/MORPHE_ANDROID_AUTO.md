@@ -1,14 +1,16 @@
 # Morphe playback on Android Auto
 
+**October 4 update:** Native Morphe is now integrated in v16, with Shizuku authorization, independent phone use, knob seek, Now playing, and split-area fitting verified in the DHU. See [current native implementation and remaining gates](MORPHE_NATIVE.md). The notes below describe the screen-sharing backend retained as backup.
+
 Updated October 2, 2026. This replaces the earlier hypothesis-only investigation: **the installed Morphe app's actual video has now been rendered on the desktop Android Auto head unit.** Physical Mazda testing remains outstanding.
 
 **October 3 wide-display follow-up:** the Mazda test profile now uses a 1280×480 active display and explicit rotary input mode. This is a working assumption for the factory 10.25-inch screen; this car's exact geometry/DPI is unconfirmed. The normal POI app receives 770×460. A separate `fullscreenProbe` build declaring NAVIGATION receives **1190×460** when opened from the launcher. Actual Morphe video renders there using `NavigationTemplate` with no status pane; Android Auto's sidebar and compact transport buttons remain. Opening the dashboard can still show a companion card. This category is only a local experiment and is not a valid karaoke classification for Play. The standard release stays POI. See [build/restore instructions and screenshots](../README.md#full-width-local-experiment--october-3-2026).
 
 The wide test exercised rotary list focus/selection and explicit center-key press/release for pause/resume. A second session with touch disabled confirmed video after reconnect, song changes, pause, and Back to browsing. Instant DHU `dpad click` was unreliable for the playback buttons. Twenty unit tests pass; signed probe APK and standard release APK/AAB build. These results supersede the earlier rotary configuration finding below. Automatic control hiding, physical Mazda behavior, and measured A/V offset remain unverified. One stale browse surface rejected EGL attachment when sharing first started; selecting playback supplied a fresh surface and video recovered without repeating consent.
 
-**Native alternative investigated:** a separate shell-hosted trusted display successfully ran the installed Morphe app without MediaProjection on the Pixel, including URL song changes. See [native Morphe findings and prototype](MORPHE_NATIVE.md). That backend is not integrated into the current Car Lyrics release yet.
+**Native alternative investigated:** a separate shell-hosted trusted display successfully ran the installed Morphe app without MediaProjection on the Pixel, including URL song changes. See [native Morphe findings and prototype](MORPHE_NATIVE.md). That investigation led to the opt-in native backend integrated in v16.
 
-## Current implementation
+## Screen-sharing backup implementation
 
 ```mermaid
 flowchart LR
@@ -52,7 +54,7 @@ A screenshot of a valid surface or a PLAYING media state alone is not proof of v
 4. **Larger lyrics:** preserve video edges and verify the wide layout on the actual Mazda. The standard POI app cannot independently remove the host's side panel. The October 3 navigation-host experiment expands the app, but its category is unsuitable for a public karaoke release.
 5. **Morphe extension only if needed:** a version-specific Morphe patch could expose video ID, duration, position, seek, completion, fullscreen, and queue events directly. Start with a small explicit bridge rather than porting the entire patched APK. This is not implemented in 0.4.0.
 
-The existing mirror remains the implemented Android Auto backend. The native investigation now recommends testing a Shizuku display host before an APK fork. A Morphe fork remains a maintenance-heavy alternative: the project supplies patches for specific YouTube APK versions, not the full YouTube source tree.
+The existing mirror remains available as backup. The Shizuku native host is now implemented and avoids an APK fork. A Morphe fork remains a maintenance-heavy alternative: the project supplies patches for specific YouTube APK versions, not the full YouTube source tree.
 
 ## Sources
 

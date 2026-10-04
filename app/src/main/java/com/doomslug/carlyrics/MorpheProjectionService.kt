@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.graphics.Rect
 import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -71,7 +72,7 @@ class MorpheProjectionService : Service() {
             display = capture.createVirtualDisplay("Car Lyrics Morphe mirror",
                 captureWidth, captureHeight, metrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, videoRenderer.input, null, main)
-            target?.let(videoRenderer::attach)
+            target?.let { videoRenderer.attach(it, MorpheCaptureGrant.visibleArea) }
             MorpheCaptureGrant.service = this
             MorpheCaptureGrant.update(true, "Morphe sharing ready • choose a song on the car screen")
             Log.i(TAG, "projection started; attached=${target != null}")
@@ -87,7 +88,7 @@ class MorpheProjectionService : Service() {
         val surface = container.surface ?: return
         if (!surface.isValid || container.width <= 0 || container.height <= 0) return
         runCatching {
-            renderer?.attach(container)
+            renderer?.attach(container, MorpheCaptureGrant.visibleArea)
             Log.i(TAG, "attached car surface ${container.width}x${container.height}")
         }.onFailure {
             Log.e(TAG, "Attach failed", it)
@@ -100,6 +101,8 @@ class MorpheProjectionService : Service() {
         renderer?.detach()
         Log.i(TAG, "car surface detached; projection retained")
     }
+
+    internal fun updateVisibleArea(area: Rect) { renderer?.setVisibleArea(area) }
 
     override fun onDestroy() {
         if (MorpheCaptureGrant.service === this) MorpheCaptureGrant.service = null

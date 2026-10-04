@@ -5,11 +5,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
     <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <queries>
         <package android:name="app.morphe.android.youtube" />
         <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
     </queries>
     <application android:allowBackup="false" android:appCategory="maps" android:label="Car Lyrics" android:icon="@drawable/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false" android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

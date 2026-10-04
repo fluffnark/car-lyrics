@@ -128,20 +128,23 @@ class VideoSearchTest {
         }
         var reply: ((VideoSearchResult) -> Unit)? = null
         val screen = CarLyricsScreen(context, catalog, player, SavedVideos(context), VideoSearch { _, callback -> reply = callback })
+        val manager = context.getCarService(androidx.car.app.ScreenManager::class.java)
+        context.lifecycleOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        manager.push(screen)
         val done = object : OnDoneCallback {}
-        ((screen.onGetTemplate() as ListTemplate).singleList!!.items.first() as Row).onClickDelegate!!.sendClick(done)
-        val search = screen.onGetTemplate() as SearchTemplate
+        ((manager.top.onGetTemplate() as ListTemplate).singleList!!.items.first() as Row).onClickDelegate!!.sendClick(done)
+        val search = manager.top.onGetTemplate() as SearchTemplate
         assertFalse(search.isShowKeyboardByDefault)
         search.searchCallbackDelegate.sendSearchSubmitted("Play Don't Stop Me Now by Queen", done)
         reply!!(VideoSearchResult(listOf(remoteSong)))
         // Real DHU host clears its old search field when its voice overlay closes.
         search.searchCallbackDelegate.sendSearchTextChanged("", done)
-        val results = screen.onGetTemplate() as ListTemplate
+        val results = manager.top.onGetTemplate() as ListTemplate
         assertEquals("Play Don't Stop Me Now by Queen", results.header!!.title.toString())
         val result = results.singleList!!.items.first() as Row
         assertEquals(remoteSong.title, result.title.toString())
         result.onClickDelegate!!.sendClick(done)
         assertEquals(remoteSong, selected)
-        assertTrue(screen.onGetTemplate() is MapWithContentTemplate)
+        assertTrue(manager.top.onGetTemplate() is MapWithContentTemplate)
     }
 }

@@ -16,6 +16,26 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MorpheScreenShareTest {
+    @Test fun selectionBeforeSharingApprovalStartsOnceWhenReady() {
+        val app = RuntimeEnvironment.getApplication()
+        shadowOf(app.getSystemService(NotificationManager::class.java))
+            .setNotificationListenerAccessGranted(MorpheMediaAccess.component(app), true)
+        MorpheCaptureGrant.update(false, "Approve sharing")
+        val player = MorpheScreenShare(app)
+        try {
+            player.select(KaraokeVideo("0bWyV22Gzhw", "Pending karaoke"))
+            assertNull(shadowOf(app).nextStartedActivity)
+            MorpheCaptureGrant.update(true, "Ready")
+            assertEquals("https://www.youtube.com/watch?v=0bWyV22Gzhw", shadowOf(app).nextStartedActivity.dataString)
+            MorpheCaptureGrant.update(true, "Still ready")
+            shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+            assertNull(shadowOf(app).nextStartedActivity)
+        } finally {
+            player.close()
+            MorpheCaptureGrant.update(false, "Stopped")
+        }
+    }
+
     @Test fun songOpensOnPhoneRatherThanPrivateCarDisplay() {
         val app = RuntimeEnvironment.getApplication()
         val carDisplayContext = object : ContextWrapper(app) {

@@ -1,6 +1,7 @@
 package com.doomslug.carlyrics
 
 import android.graphics.SurfaceTexture
+import android.graphics.Rect
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLSurface
@@ -34,6 +35,7 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
     private var height = height
     private var outputWidth = 0
     private var outputHeight = 0
+    private var visibleArea: Rect? = null
     private var hasFrame = false
     private var frames = 0
     private val matrix = FloatArray(16)
@@ -107,19 +109,28 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
         texture.setDefaultBufferSize(width, height)
     } }
 
-    fun attach(container: SurfaceContainer) { handler.post {
+    fun attach(container: SurfaceContainer, area: Rect? = null) { handler.post {
         detachOutput()
         val surface = container.surface ?: return@post
         if (!surface.isValid || container.width <= 0 || container.height <= 0) return@post
         runCatching {
             outputWidth = container.width
             outputHeight = container.height
+            visibleArea = area?.let(::Rect)
             output = EGL14.eglCreateWindowSurface(egl, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
             check(output != EGL14.EGL_NO_SURFACE) { "Car output error ${EGL14.eglGetError()}" }
             current(output)
             draw()
         }.onFailure { Log.e(TAG, "Video output failed", it); detachOutput() }
     } }
+
+    fun setVisibleArea(area: Rect?) {
+        val copy = area?.let(::Rect)
+        handler.post {
+            visibleArea = copy
+            runCatching { draw() }.onFailure { Log.w(TAG, "Video resize failed", it); detachOutput() }
+        }
+    }
 
     fun detach() { handler.post { detachOutput() } }
     private fun detachOutput() {
@@ -135,10 +146,13 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
         GLES20.glViewport(0, 0, outputWidth, outputHeight)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        val scale = minOf(outputWidth.toFloat() / width, outputHeight.toFloat() / height)
-        val w = (width * scale).toInt()
-        val h = (height * scale).toInt()
-        GLES20.glViewport((outputWidth-w)/2, (outputHeight-h)/2, w, h)
+        val viewport = VideoViewport.fit(outputWidth, outputHeight, width, height, visibleArea)
+        if (viewport.isEmpty) {
+            EGL14.eglSwapBuffers(egl, output)
+            return
+        }
+        // OpenGL starts at the bottom; Android's visible rectangle starts at the top.
+        GLES20.glViewport(viewport.left, outputHeight - viewport.bottom, viewport.width(), viewport.height())
         GLES20.glUseProgram(program)
         val position = GLES20.glGetAttribLocation(program, "position")
         val uv = GLES20.glGetAttribLocation(program, "uv")

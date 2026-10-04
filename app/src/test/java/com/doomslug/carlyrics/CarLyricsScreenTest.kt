@@ -3,13 +3,12 @@ package com.doomslug.carlyrics
 import android.app.Application
 import androidx.car.app.OnDoneCallback
 import androidx.car.app.ScreenManager
-import androidx.car.app.SurfaceContainer
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
+import androidx.car.app.model.SearchTemplate
 import androidx.car.app.navigation.model.MapWithContentTemplate
+import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.car.app.testing.TestCarContext
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleRegistry
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -24,168 +23,154 @@ class CarLyricsScreenTest {
     private val app get() = RuntimeEnvironment.getApplication() as Application
     private val done = object : OnDoneCallback {}
     private val videos = (1..10).map { KaraokeVideo("%011d".format(it), "Song $it (Karaoke Version)") }
+    private lateinit var context: TestCarContext
+    private lateinit var manager: ScreenManager
+    private lateinit var player: FakePlayer
 
-    @Before fun clear() {
-        app.getSharedPreferences("saved_videos", 0).edit().clear().commit()
-        app.getSharedPreferences("karaoke_playlists", 0).edit().clear().commit()
-        app.getSharedPreferences("karaoke_queue", 0).edit().clear().commit()
+    @Before fun setup() {
+        listOf("saved_videos", "karaoke_playlists", "karaoke_queue").forEach { app.getSharedPreferences(it, 0).edit().clear().commit() }
+        context = TestCarContext.createCarContext(app)
+        manager = context.getCarService(ScreenManager::class.java)
+        context.lifecycleOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        player = FakePlayer()
+    }
+    private fun start(wide: Boolean = false) {
+        manager.push(CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context), fullscreenHost = wide))
+    }
+    private fun list() = manager.top.onGetTemplate() as ListTemplate
+    private fun click(prefix: String) {
+        val row = list().singleList!!.items.map { it as Row }.first { it.title.toString().startsWith(prefix) }
+        assertFalse(row.onClickDelegate!!.isParkedOnly)
+        row.onClickDelegate!!.sendClick(done)
+    }
+    private fun returnToVideo() {
+        list().header!!.endHeaderActions.first { it.title.toString() == "Now playing" }.onClickDelegate!!.sendClick(done)
+    }
+    private fun controls() = when (val t = manager.top.onGetTemplate()) {
+        is NavigationTemplate -> t.actionStrip!!
+        is MapWithContentTemplate -> t.actionStrip!!
+        else -> error("Not player")
     }
 
-    @Test fun rotaryBrowseSelectPauseSaveAndReturn() {
-        val context = TestCarContext.createCarContext(app)
-        val player = FakePlayer()
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
-        val browse = screen.onGetTemplate() as ListTemplate
-        assertEquals("Sing King • Recent", browse.header!!.title.toString())
-        val first = browse.singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
-        assertNotNull(first.image)
-        assertFalse(first.onClickDelegate!!.isParkedOnly)
-        first.onClickDelegate!!.sendClick(done)
+    @Test fun returnFromEveryMenuKeepsTheSameVideoAndPosition() {
+        start(true)
+        click("Song 1")
+        val playing = manager.top
+        repeat(8) {
+            controls().actions[3].onClickDelegate!!.sendClick(done)
+            click("Queue")
+            returnToVideo()
+            assertSame(playing, manager.top)
+            controls().actions[3].onClickDelegate!!.sendClick(done)
+            click("Playlists")
+            click("My karaoke mix")
+            returnToVideo()
+            assertSame(playing, manager.top)
+            controls().actions[3].onClickDelegate!!.sendClick(done)
+            click("Search YouTube")
+            val search = manager.top.onGetTemplate() as SearchTemplate
+            search.actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
+            assertSame(playing, manager.top)
+            assertEquals(2, manager.screenStack.size)
+        }
+        assertEquals(listOf(videos.first()), player.selections)
+        assertEquals(0, player.hides)
+        assertEquals(0, player.closes)
+    }
 
-        assertEquals(videos.first(), player.selected)
-        val loading = screen.onGetTemplate() as MapWithContentTemplate
-        assertEquals(4, loading.actionStrip!!.actions.size)
-        player.onStatus?.invoke(PlaybackStatus.PLAYING)
-        val playing = screen.onGetTemplate() as MapWithContentTemplate
-        assertEquals("Pause", playing.actionStrip!!.actions[0].title.toString())
-        playing.actionStrip!!.actions[0].onClickDelegate!!.sendClick(done)
+    @Test fun backReturnsTheOriginalTemplateAndMenuContent() {
+        start()
+        click("Playlists")
+        val playlists = manager.top
+        click("My karaoke mix")
+        manager.pop()
+        assertSame(playlists, manager.top)
+        assertEquals("Your playlists", list().header!!.title.toString())
+        manager.pop()
+        assertEquals("Sing King • Recent", list().header!!.title.toString())
+    }
+
+    @Test fun seekUsesKnobSelectionAndReturnDoesNotReloadVideo() {
+        start(true)
+        click("Song 1")
+        val playing = manager.top
+        val full = playing.onGetTemplate() as NavigationTemplate
+        full.mapActionStrip!!.actions[0].onClickDelegate!!.sendClick(done)
+        val timeline = list().singleList!!
+        assertTrue(timeline.items.size > 4)
+        timeline.onSelectedDelegate!!.sendSelected(4, done)
+        // The test host reports a short list limit, so the timeline uses 40-second steps.
+        assertEquals(160_000L, player.sought)
+        returnToVideo()
+        assertSame(playing, manager.top)
+        assertEquals(1, player.selections.size)
+        (manager.top.onGetTemplate() as NavigationTemplate).mapActionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
+        assertEquals(1, player.repairs)
+    }
+
+    @Test fun compactControlsFollowRealPlaybackStateAndWrapQueue() {
+        start(true)
+        click("Song 1")
+        player.onStatus!!.invoke(PlaybackStatus.PLAYING)
+        assertTrue(controls().actions.all { !it.onClickDelegate!!.isParkedOnly })
+        controls().actions[1].onClickDelegate!!.sendClick(done)
         assertEquals(1, player.pauses)
-        // A command being sent is not proof that Morphe actually paused.
-        assertEquals("Pause", (screen.onGetTemplate() as MapWithContentTemplate).actionStrip!!.actions[0].title.toString())
-        player.onStatus?.invoke(PlaybackStatus.PAUSED)
-        val paused = screen.onGetTemplate() as MapWithContentTemplate
-        assertEquals("Play", paused.actionStrip!!.actions[0].title.toString())
-        paused.actionStrip!!.actions[2].onClickDelegate!!.sendClick(done)
-        assertTrue(SavedVideos(context).contains(videos.first().id))
-        paused.actionStrip!!.actions[3].onClickDelegate!!.sendClick(done)
-        assertEquals(1, player.hides)
-        val recent = screen.onGetTemplate() as ListTemplate
-        recent.header!!.endHeaderActions.single().onClickDelegate!!.sendClick(done)
-        val saved = screen.onGetTemplate() as ListTemplate
-        assertEquals("Saved karaoke songs", saved.header!!.title.toString())
-        assertEquals(videos.first().title, (saved.singleList!!.items[1] as Row).title.toString())
-    }
-
-    @Test fun paginationAndPlaybackErrorOfferUsefulActions() {
-        val context = TestCarContext.createCarContext(app)
-        val player = FakePlayer()
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
-        val firstPage = screen.onGetTemplate() as ListTemplate
-        val more = firstPage.singleList!!.items.last() as Row
-        assertTrue(more.title.toString().startsWith("More songs"))
-        more.onClickDelegate!!.sendClick(done)
-        val secondPage = screen.onGetTemplate() as ListTemplate
-        assertEquals("Previous page", (secondPage.singleList!!.items.first() as Row).title.toString())
-        val song = secondPage.singleList!!.items[1] as Row
-        song.onClickDelegate!!.sendClick(done)
-        assertEquals(videos[4], player.selected)
-        player.onStatus?.invoke(PlaybackStatus.ERROR)
-        val error = screen.onGetTemplate() as MapWithContentTemplate
-        assertEquals("Retry", error.actionStrip!!.actions[0].title.toString())
-        assertFalse(error.actionStrip!!.actions[0].onClickDelegate!!.isParkedOnly)
-        error.actionStrip!!.actions[0].onClickDelegate!!.sendClick(done)
+        player.onStatus!!.invoke(PlaybackStatus.PAUSED)
+        controls().actions[1].onClickDelegate!!.sendClick(done)
         assertEquals(1, player.resumes)
+        controls().actions[0].onClickDelegate!!.sendClick(done)
+        assertEquals(videos.last(), player.selections.last())
+        controls().actions[2].onClickDelegate!!.sendClick(done)
+        assertEquals(videos.first(), player.selections.last())
     }
 
-    @Test fun nextAndPreviousFollowTheSelectedPageAndWrap() {
-        val context = TestCarContext.createCarContext(app)
-        val player = FakePlayer()
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
-        val first = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
-        first.onClickDelegate!!.sendClick(done)
-        val actions = ((screen.onGetTemplate() as MapWithContentTemplate).contentTemplate as androidx.car.app.model.PaneTemplate)
-            .pane!!.actions
-        actions[0].onClickDelegate!!.sendClick(done)
-        assertEquals(videos.last(), player.selected)
-        actions[1].onClickDelegate!!.sendClick(done)
-        assertEquals(videos.first(), player.selected)
+    @Test fun setupErrorAndRecoveryKeepPlayerTemplateTypeStable() {
+        start(true)
+        player.detail = "Start sharing on your phone"
+        click("Song 1")
+        assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        player.detail = null
+        returnToVideo()
+        assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
     }
 
-    @Test fun hardwareBackReturnsFromPlayerToBrowse() {
-        val context = TestCarContext.createCarContext(app)
-        val player = FakePlayer()
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
-        context.getCarService(ScreenManager::class.java).push(screen)
-        val lifecycle = screen.lifecycle as LifecycleRegistry
-        lifecycle.currentState = Lifecycle.State.CREATED
-        lifecycle.currentState = Lifecycle.State.STARTED
-        val row = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
-        row.onClickDelegate!!.sendClick(done)
-        assertTrue(screen.onGetTemplate() is MapWithContentTemplate)
-        context.onBackPressedDispatcher.onBackPressed()
-        assertTrue(screen.onGetTemplate() is ListTemplate)
-        assertEquals(1, player.hides)
-        lifecycle.currentState = Lifecycle.State.DESTROYED
-    }
-
-    @Test fun browseExposesSearchAndCuratedCollections() {
-        val context = TestCarContext.createCarContext(app)
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), FakePlayer(), SavedVideos(context))
-        val browse = screen.onGetTemplate() as ListTemplate
-        val searchRow = browse.singleList!!.items.first() as Row
-        assertEquals("Search YouTube", searchRow.title.toString())
-        searchRow.onClickDelegate!!.sendClick(done)
-        val search = screen.onGetTemplate() as androidx.car.app.model.SearchTemplate
-        assertEquals("Song, artist, album, or genre", search.searchHint)
-    }
-
-    @Test fun queueAndPlaylistActionsPersistTheCurrentSong() {
-        val context = TestCarContext.createCarContext(app)
-        val player = FakePlayer()
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context))
-        val row = (screen.onGetTemplate() as ListTemplate).singleList!!.items.first { (it as Row).title.toString().startsWith("Song") } as Row
-        row.onClickDelegate!!.sendClick(done)
-        val playerTemplate = screen.onGetTemplate() as MapWithContentTemplate
-        playerTemplate.actionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
-        playerTemplate.actionStrip!!.actions[2].onClickDelegate!!.sendClick(done)
-        assertEquals(videos.first(), QueueStore(context).all().single())
-        assertEquals(videos.first(), PlaylistStore(context).all().first().videos.single())
+    @Test fun returningFromMenuRoutesLiveStatusToThePlayer() {
+        start(true)
+        click("Song 1")
+        val playing = manager.top
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        returnToVideo()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        val appManager = context.getCarService(androidx.car.app.AppManager::class.java) as androidx.car.app.testing.TestAppManager
+        appManager.reset()
+        player.detail = "Recovering picture"
+        player.onStatus!!.invoke(PlaybackStatus.LOADING)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertTrue(appManager.templatesReturned.any { it.first === playing &&
+            (it.second as? NavigationTemplate)?.navigationInfo is androidx.car.app.navigation.model.MessageInfo })
     }
 
     private class FakeCatalog(override val videos: List<KaraokeVideo>) : VideoCatalog {
         override val loading = false
-        override val error: String? = null
+        override val error = null
         override fun refresh(done: () -> Unit) = done()
     }
-
-    @Test fun fullscreenProbeHasNoStatusPaneAndKeepsKnobTransportAndBrowse() {
-        val context = TestCarContext.createCarContext(app)
-        var pauses = 0
-        val player = object : VideoPlayer {
-            override val compactControls = true
-            override var onStatus: ((PlaybackStatus) -> Unit)? = null
-            override fun select(video: KaraokeVideo) {}
-            override fun pause() { pauses++ }
-            override fun resume() {}
-            override fun hide() {}
-            override fun close() {}
-        }
-        val screen = CarLyricsScreen(context, FakeCatalog(videos), player, SavedVideos(context), fullscreenHost = true)
-        val song = (screen.onGetTemplate() as ListTemplate).singleList!!.items
-            .first { (it as Row).title.toString().startsWith("Song") } as Row
-        song.onClickDelegate!!.sendClick(done)
-        player.onStatus!!.invoke(PlaybackStatus.PLAYING)
-        val full = screen.onGetTemplate() as androidx.car.app.navigation.model.NavigationTemplate
-        assertNull(full.navigationInfo)
-        assertEquals(4, full.actionStrip!!.actions.size)
-        full.actionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
-        assertEquals(1, pauses)
-        full.actionStrip!!.actions[3].onClickDelegate!!.sendClick(done)
-        assertTrue(screen.onGetTemplate() is ListTemplate)
-    }
-
     private class FakePlayer : VideoPlayer {
+        override val compactControls = true
         override var onStatus: ((PlaybackStatus) -> Unit)? = null
-        var selected: KaraokeVideo? = null
-        var pauses = 0
-        var resumes = 0
-        var hides = 0
-        override fun select(video: KaraokeVideo) { selected = video }
+        override val timeline = VideoTimeline(20_000, 240_000, true)
+        var detail: String? = null
+        override val statusDetail get() = detail
+        val selections = mutableListOf<KaraokeVideo>()
+        var pauses = 0; var resumes = 0; var hides = 0; var closes = 0; var repairs = 0
+        var sought = -1L
+        override fun select(video: KaraokeVideo) { selections += video }
         override fun pause() { pauses++ }
         override fun resume() { resumes++ }
         override fun hide() { hides++ }
-        override fun close() {}
-        override fun onSurfaceAvailable(container: SurfaceContainer) {}
-        override fun onSurfaceDestroyed(container: SurfaceContainer) {}
+        override fun close() { closes++ }
+        override fun seekTo(positionMs: Long) { sought = positionMs }
+        override fun recoverVideo() { repairs++ }
     }
 }

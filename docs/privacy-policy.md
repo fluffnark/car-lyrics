@@ -1,6 +1,6 @@
 # Car Lyrics Privacy Policy
 
-**Effective date: October 3, 2026**
+**Effective date: October 4, 2026**
 
 Car Lyrics is a private Android Auto prototype developed by Caleb Cheng ("we", "us", or "our"). This policy explains what the app does with information when you use it.
 
@@ -28,6 +28,10 @@ Voice recognition is provided by Android Auto or the speech service installed on
 ## Screen sharing and playback controls
 
 With your Android screen-sharing approval, Car Lyrics captures the selected app’s video frames in memory and displays them through Android Auto. It does not record or upload those frames to a server. Android notification access is used only to identify and control Morphe’s media session and read playback state; Car Lyrics does not read or save notification contents. Google sign-in and viewing activity remain in the selected player.
+
+## Optional native Morphe mode
+
+With optional Shizuku authorization, Car Lyrics starts a local helper to open the installed Morphe app on a separate display and show its frames in Android Auto. This mode does not capture the phone screen. The helper only exposes Morphe display and video-launch operations to Car Lyrics; it does not read your accounts, messages, or files. You can revoke this access in Shizuku. Frames remain in memory and are not recorded or uploaded by Car Lyrics.
 
 ## Data security and retention
 

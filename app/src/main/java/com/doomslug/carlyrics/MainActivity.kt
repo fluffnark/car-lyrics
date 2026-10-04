@@ -23,6 +23,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.media.projection.MediaProjectionManager
 import android.provider.Settings
+import rikka.shizuku.Shizuku
 
 /** Session setup and passenger queue; song selection and transport controls also work in the car. */
 class MainActivity : Activity() {
@@ -44,9 +45,18 @@ class MainActivity : Activity() {
         )
     }
     private lateinit var morpheStatus: TextView
+    private lateinit var sharingButton: Button
+    private lateinit var stopSharingButton: Button
+    private lateinit var controlsExplanation: TextView
+    private lateinit var nativeButton: Button
+    private var awaitingControls = false
+    private var requestingCapture = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Shizuku.addRequestPermissionResultListener(nativePermissionResult)
+        awaitingControls = savedInstanceState?.getBoolean("awaiting_controls") ?: false
+        requestingCapture = savedInstanceState?.getBoolean("requesting_capture") ?: false
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.rgb(13, 20, 32))
             isFillViewport = true
@@ -71,7 +81,7 @@ class MainActivity : Activity() {
         body.addView(space(8))
         body.addView(text("Your karaoke stage.", 36f, ink, true))
         body.addView(space(12))
-        body.addView(text("Choose a Sing King song with your Mazda Commander knob. Start Morphe sharing once, then use the car controls.", 17f, muted))
+        body.addView(text("Find your song, build a queue, and play with the Mazda Commander knob.", 17f, muted))
         body.addView(space(28))
 
         val card = LinearLayout(this).apply {
@@ -94,32 +104,38 @@ class MainActivity : Activity() {
         morpheStatus = text("Share only Morphe in Android’s picker. Your existing YouTube login and karaoke video stay in Morphe.", 14f, muted)
         morpheCard.addView(morpheStatus)
         morpheCard.addView(space(10))
-        morpheCard.addView(Button(this).apply {
-            text = "Start Morphe sharing"
+        sharingButton = Button(this).apply {
             isAllCaps = false
-            setOnClickListener { requestMorpheCapture() }
-        })
-        morpheCard.addView(Button(this).apply {
-            text = "Enable Morphe controls"
-            isAllCaps = false
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
-                    .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MorpheMediaAccess.component(this@MainActivity).flattenToString()))
-            }
-        })
-        morpheCard.addView(text("Android calls this notification access. Car Lyrics uses it only to read Morphe’s playback state and send playback controls; it does not read or save your messages.", 13f, muted))
-        morpheCard.addView(Button(this).apply {
+            setTextColor(Color.rgb(13, 20, 32))
+            backgroundTintList = android.content.res.ColorStateList.valueOf(mint)
+            setOnClickListener { continueMorpheSetup() }
+        }
+        morpheCard.addView(sharingButton)
+        controlsExplanation = text("Android calls this notification access. Car Lyrics uses it only for Morphe’s playback state and controls; it does not read or save your messages. Return here after enabling access.", 13f, muted)
+        morpheCard.addView(controlsExplanation)
+        stopSharingButton = Button(this).apply {
             text = "Stop sharing"
             isAllCaps = false
             setOnClickListener { stopService(Intent(this@MainActivity, MorpheProjectionService::class.java)) }
-        })
+        }
+        morpheCard.addView(stopSharingButton)
+        nativeButton = Button(this).apply {
+            isAllCaps = false
+            setOnClickListener {
+                if (MorpheNativeDisplay.enabled(this@MainActivity)) {
+                    getSharedPreferences("car_lyrics", MODE_PRIVATE).edit().putBoolean("native_morphe", false).apply()
+                    updateMorpheStatus()
+                } else enableNative()
+            }
+        }
+        morpheCard.addView(nativeButton)
         body.addView(morpheCard)
         body.addView(space(14))
         body.addView(card)
         body.addView(space(30))
         body.addView(text("PASSENGER QUEUE", 13f, mint, true).apply { letterSpacing = 0.14f })
         body.addView(space(8))
-        body.addView(text("Search and add songs from the phone while the car screen stays focused on playback.", 15f, muted))
+        body.addView(text("Add songs from any provider. Native Morphe keeps car video separate from this phone; screen-sharing mode needs Morphe visible.", 15f, muted))
         body.addView(space(10))
         searchInput = EditText(this).apply {
             hint = "Search song, artist, album, or genre"
@@ -163,8 +179,23 @@ class MainActivity : Activity() {
         preview = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(preview)
         body.addView(space(30))
-        body.addView(text("Keep the phone unlocked while sharing. Android may ask you to approve sharing again after locking or reconnecting.", 14f, muted))
-        setContentView(scroll)
+        body.addView(text("Native mode needs Shizuku running. Screen-sharing backup needs Morphe visible and the phone unlocked; Android may ask for fresh sharing approval.", 14f, muted))
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        layout.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        layout.addView(Button(this).apply {
+            text = "Return to current video"
+            isAllCaps = false
+            setTextColor(Color.rgb(13, 20, 32))
+            backgroundTintList = android.content.res.ColorStateList.valueOf(mint)
+            setOnClickListener {
+                showCurrentVideo()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+        layout.setOnApplyWindowInsetsListener { view, insets ->
+            view.setPadding(0, 0, 0, insets.getInsets(WindowInsets.Type.systemBars()).bottom)
+            insets
+        }
+        setContentView(layout)
 
         SingKingCatalog.initialize(this)
         val restoredQuery = savedInstanceState?.getString("search_query").orEmpty()
@@ -188,12 +219,71 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun requestMorpheCapture() {
-        if (MorpheCaptureGrant.isGranted) { updateMorpheStatus(); return }
+    private fun continueMorpheSetup() {
+        if (!MorpheMediaAccess.enabled(this)) {
+            awaitingControls = true
+            runCatching {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                    .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MorpheMediaAccess.component(this).flattenToString()))
+            }.onFailure {
+                awaitingControls = false
+                morpheStatus.text = "Open Android Settings → Notification access → Car Lyrics Morphe controls."
+            }
+        } else if (MorpheNativeDisplay.enabled(this)) {
+            if (!MorpheNativeDisplay.authorized()) enableNative()
+            else showCurrentVideo()
+        } else if (MorpheCaptureGrant.isGranted) {
+            openMorphe()
+        } else requestMorpheCapture()
+    }
+
+    private val nativePermissionResult = Shizuku.OnRequestPermissionResultListener { code, result ->
+        if (code == 4109) {
+            if (result == android.content.pm.PackageManager.PERMISSION_GRANTED) activateNative()
+            else morpheStatus.text = "Native access wasn’t enabled. Screen sharing is still available."
+        }
+    }
+    private fun showCurrentVideo() {
+        val shown = CarPlaybackLink.showPlayer?.invoke() == true
+        if (!MorpheNativeDisplay.enabled(this)) openMorphe()
+        else Toast.makeText(this, if (shown) "Current video selected on Android Auto"
+            else "Open Car Lyrics in Android Auto and select a song first", Toast.LENGTH_LONG).show()
+    }
+    private fun enableNative() {
+        if (!Shizuku.pingBinder()) { morpheStatus.text = "Open Shizuku and tap Start, then return here to enable native Morphe."; return }
+        if (MorpheNativeDisplay.authorized()) activateNative()
+        else runCatching { Shizuku.requestPermission(4109) }.onFailure {
+            morpheStatus.text = "Allow Car Lyrics in Shizuku’s Authorized applications, then try again."
+        }
+    }
+    private fun activateNative() {
+        stopService(Intent(this, MorpheProjectionService::class.java))
+        getSharedPreferences("car_lyrics", MODE_PRIVATE).edit().putBoolean("native_morphe", true).apply()
+        updateMorpheStatus()
+    }
+
+    private fun openMorphe(): Boolean {
         val morphe = packageManager.getLaunchIntentForPackage(MorpheMediaAccess.PACKAGE)
-        if (morphe == null) { morpheStatus.text = "Install Morphe YouTube on this phone first."; return }
+        if (morphe == null) { morpheStatus.text = "Install Morphe YouTube on this phone first."; return false }
+        return runCatching { startActivity(morphe); true }.getOrElse {
+            morpheStatus.text = "Could not open Morphe. Open YouTube Morphe from your phone’s launcher."
+            false
+        }
+    }
+
+    private fun requestMorpheCapture() {
+        if (requestingCapture || MorpheCaptureGrant.isGranted) return
+        // Put Morphe in the recent-app list before Android asks which app to share.
+        // Consent and the choice of app remain with the user.
+        if (!openMorphe()) return
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_MORPHE_CAPTURE)
+        requestingCapture = true
+        runCatching {
+            startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_MORPHE_CAPTURE)
+        }.onFailure {
+            requestingCapture = false
+            morpheStatus.text = "Could not open Android’s sharing picker. Try Start Morphe sharing again."
+        }
     }
 
     @Deprecated("Activity result API kept small for the development prototype")
@@ -212,7 +302,13 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (requestCode != REQUEST_MORPHE_CAPTURE || resultCode != RESULT_OK || data == null) return
+        if (requestCode != REQUEST_MORPHE_CAPTURE) return
+        requestingCapture = false
+        if (resultCode != RESULT_OK || data == null) {
+            updateMorpheStatus()
+            morpheStatus.text = "Sharing wasn’t started. Tap Start Morphe sharing when you’re ready."
+            return
+        }
         startForegroundService(Intent(this, MorpheProjectionService::class.java).apply {
             action = MorpheProjectionService.ACTION_START
             putExtra(MorpheProjectionService.EXTRA_RESULT_CODE, resultCode)
@@ -230,6 +326,15 @@ class MainActivity : Activity() {
         updateMorpheStatus()
     }
 
+    override fun onResume() {
+        super.onResume()
+        updateMorpheStatus()
+        if (awaitingControls) {
+            awaitingControls = false
+            if (MorpheMediaAccess.enabled(this) && !MorpheCaptureGrant.isGranted && !MorpheNativeDisplay.enabled(this)) requestMorpheCapture()
+        }
+    }
+
     override fun onStop() {
         MorpheCaptureGrant.removeObserver(captureChanged)
         super.onStop()
@@ -237,19 +342,37 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("search_query", searchInput.text.toString())
+        outState.putBoolean("awaiting_controls", awaitingControls)
+        outState.putBoolean("requesting_capture", requestingCapture)
         super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(nativePermissionResult)
         searchSession.close()
         super.onDestroy()
     }
 
     private fun updateMorpheStatus() {
         if (!::morpheStatus.isInitialized) return
-        morpheStatus.text = if (!MorpheMediaAccess.enabled(this))
-            "Enable Morphe controls below, then start sharing and select only Morphe in Android’s picker."
-        else MorpheCaptureGrant.message
+        val controlsReady = MorpheMediaAccess.enabled(this)
+        val sharing = MorpheCaptureGrant.isGranted
+        val native = MorpheNativeDisplay.enabled(this)
+        nativeButton.text = if (native) "Use screen-sharing backup" else "Enable native Morphe • Shizuku"
+        sharingButton.text = when {
+            !controlsReady -> "Enable Morphe controls"
+            native -> if (MorpheNativeDisplay.authorized()) "Show current video on car" else "Reconnect native Morphe"
+            sharing -> "Return to Morphe"
+            else -> "Start Morphe sharing"
+        }
+        controlsExplanation.visibility = if (controlsReady) View.GONE else View.VISIBLE
+        stopSharingButton.visibility = if (sharing) View.VISIBLE else View.GONE
+        morpheStatus.text = when {
+            !controlsReady -> "One-time setup: enable playback controls, then share Morphe."
+            native -> "Native Morphe is enabled. Select a song in Android Auto; no sharing picker is needed while Shizuku is running. Your phone stays free for the queue."
+            sharing -> "Sharing is ready. Use the car to search, choose a song, and skip. Return to Morphe after using the passenger queue."
+            else -> "Choose Share one app → Next → YouTube Morphe. Then select a song on the car screen."
+        }
     }
 
     private fun renderPhoneResults() {
