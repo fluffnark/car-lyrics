@@ -4,7 +4,7 @@ Private Android Auto karaoke prototype for a 2021 Mazda CX-5, using the installe
 
 ## Current test build — 0.5.0 (16), October 4, 2026
 
-**Car Lyrics Native Dev** is installed alongside the Play-installed v14 on the Pixel 7a. Open **Native Dev** in Android Auto to test these changes. It uses package `com.doomslug.carlyrics.dev` and a separate local queue. The Play copy and its saved data were preserved; its Play signing key differs from our local upload key.
+**Car Lyrics Native Dev** is installed alongside the Play-installed v14 on the Pixel 7a. Open **Native Dev** in the desktop Android Auto emulator to test these changes. For the physical Mazda, install the standard release through Play internal testing or Internal App Sharing; the ADB-installed Native Dev copy does not satisfy the Car App Library trusted-install requirement. It uses package `com.doomslug.carlyrics.dev` and a separate local queue. The Play copy and its saved data were preserved; its Play signing key differs from our local upload key.
 
 - **Now playing** returns to the existing player from every car menu/search screen. Back uses Android Auto’s actual screen stack, and playback/status survive menu navigation.
 - **Seek current video**: turn the knob to choose a time, then press to seek. Ordinary songs have 10-second steps; long videos use larger steps to fit the host’s list limit.
@@ -16,12 +16,25 @@ Private Android Auto karaoke prototype for a 2021 Mazda CX-5, using the installe
 
 1. On the phone, open **Car Lyrics Native Dev** and enable **Morphe controls**. Android calls this notification access; Car Lyrics uses Morphe’s playback state and transport controls, not notification contents.
 2. Ensure **Shizuku** says it is running. In Car Lyrics choose **Enable native Morphe • Shizuku** and allow access. These permissions and native mode are already configured for Native Dev on the connected Pixel.
-3. Open **Car Lyrics Native Dev** in Android Auto, then choose a song, Queue, or playlist. Selection launches the installed Morphe on its separate 1280×720 display. Use Previous, Play/Pause, Next, and Browse from the car.
+3. In the desktop Android Auto emulator, open **Car Lyrics Native Dev**, then choose a song, Queue, or playlist. Selection launches the installed Morphe on its separate 1280×720 display. Use Previous, Play/Pause, Next, and Browse from the car.
 4. Use **Now playing** to return from any menu, **Seek current video** to change position, and **Repair picture** if the image needs recovery. The phone’s fixed **Return to current video** button returns the car UI too.
 
 For the backup, choose **Use screen-sharing backup → Start Morphe sharing → Share one app → YouTube Morphe**. Android requires fresh consent when capture ends. In backup mode, Morphe must remain visible on the unlocked phone; opening passenger search can hide its captured video.
 
 Morphe owns video decoding, audio, and your existing login. Car Lyrics does not store account credentials or record frames. Native mode needs Shizuku running; automatic startup after the next phone reboot and locked-phone behavior still need testing. See [native implementation and test evidence](docs/MORPHE_NATIVE.md).
+
+## Install for the physical Mazda
+
+Car App Library apps must be installed from a trusted source for real-vehicle testing. Android Auto’s Unknown sources option does **not** cover them; see [Google’s real-vehicle testing requirements](https://developer.android.com/training/cars/testing#test-in-real-vehicles). The Native Dev installation above was verified in the DHU, not as a sideloaded Mazda installation.
+
+1. Upload `app/build/outputs/bundle/release/app-release.aab` (**0.5.0 / 16**, package `com.doomslug.carlyrics`) to the existing **Internal testing** track and roll it out.
+2. On the Pixel, use the existing tester account/link and **update Car Lyrics through Google Play**. The separate Native Dev copy can remain installed.
+3. Open the updated **Car Lyrics** on the phone. Enable **Morphe controls** if requested, then choose **Enable native Morphe • Shizuku** and authorize **Car Lyrics**. Native Dev’s permission and native-mode preference belong to a different package and do not transfer.
+4. Check Shizuku says it is running, connect the Mazda, and open the Play-installed **Car Lyrics**. Select a song. Keep Morphe’s fullscreen preference set to Landscape.
+
+The release bundle includes native Morphe, Now playing, seek, recovery and visible-area fitting. It uses the existing POI host rather than Native Dev’s experimental navigation host, so its panels/full-width behavior differ. Trusted installation alone does not verify the remaining physical-car behavior.
+
+Automatic Play uploads require Google Play Developer API credentials with access to this app and its testing releases. None are configured in this repository as of October 4. The local signing key signs the bundle; it does not grant Play Console access.
 
 ## Latest verification
 
