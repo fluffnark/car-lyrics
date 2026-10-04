@@ -35,6 +35,15 @@ class MainActivity : Activity() {
     private lateinit var preview: LinearLayout
     private lateinit var phoneResults: LinearLayout
     private lateinit var queueStatus: TextView
+    private lateinit var phoneScroll: ScrollView
+    private lateinit var queuePanel: LinearLayout
+    private lateinit var queueToggle: Button
+    private var queueExpanded = false
+    private val queueButtons = mutableMapOf<String, Button>()
+    private val queuePreferences by lazy { getSharedPreferences("karaoke_queue", MODE_PRIVATE) }
+    private val queueChanged = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "items") runOnUiThread { refreshPhoneQueue() }
+    }
     private val queueStore by lazy { QueueStore(this) }
     private val playlistStore by lazy { PlaylistStore(this) }
     private lateinit var searchInput: EditText
@@ -57,7 +66,7 @@ class MainActivity : Activity() {
         Shizuku.addRequestPermissionResultListener(nativePermissionResult)
         awaitingControls = savedInstanceState?.getBoolean("awaiting_controls") ?: false
         requestingCapture = savedInstanceState?.getBoolean("requesting_capture") ?: false
-        val scroll = ScrollView(this).apply {
+        phoneScroll = ScrollView(this).apply {
             setBackgroundColor(Color.rgb(13, 20, 32))
             isFillViewport = true
         }
@@ -67,10 +76,10 @@ class MainActivity : Activity() {
         }
         body.setOnApplyWindowInsetsListener { view, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars())
-            view.setPadding(dp(24), dp(28) + bars.top, dp(24), dp(36) + bars.bottom)
+            view.setPadding(dp(24), dp(28) + bars.top, dp(24), dp(36))
             insets
         }
-        scroll.addView(body)
+        phoneScroll.addView(body)
 
         body.addView(ImageView(this).apply {
             setImageResource(R.drawable.ic_launcher)
@@ -155,6 +164,8 @@ class MainActivity : Activity() {
             setOnEditorActionListener { _, action, _ ->
                 if (action == EditorInfo.IME_ACTION_SEARCH) {
                     searchSession.update(text.toString(), submitted = true)
+                    clearFocus()
+                    window.insetsController?.hide(WindowInsets.Type.ime())
                     true
                 } else false
             }
@@ -168,6 +179,15 @@ class MainActivity : Activity() {
         body.addView(space(8))
         queueStatus = text("Queue: ${queueStore.all().size} songs • My karaoke mix: ${playlistStore.all().firstOrNull { it.name == "My karaoke mix" }?.videos?.size ?: 0}", 14f, gold)
         body.addView(queueStatus)
+        queueExpanded = savedInstanceState?.getBoolean("queue_expanded") ?: false
+        queueToggle = Button(this).apply {
+            isAllCaps = false
+            setOnClickListener { queueExpanded = !queueExpanded; renderQueue() }
+        }
+        body.addView(queueToggle)
+        queuePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(queuePanel)
+        renderQueue()
         body.addView(space(8))
         phoneResults = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(phoneResults)
@@ -181,7 +201,7 @@ class MainActivity : Activity() {
         body.addView(space(30))
         body.addView(text("Native mode needs Shizuku running. Screen-sharing backup needs Morphe visible and the phone unlocked; Android may ask for fresh sharing approval.", 14f, muted))
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        layout.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        layout.addView(phoneScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         layout.addView(Button(this).apply {
             text = "Return to current video"
             isAllCaps = false
@@ -192,7 +212,10 @@ class MainActivity : Activity() {
             }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         layout.setOnApplyWindowInsetsListener { view, insets ->
-            view.setPadding(0, 0, 0, insets.getInsets(WindowInsets.Type.systemBars()).bottom)
+            // Edge-to-edge targets must handle IME insets explicitly. Otherwise
+            // queue rows remain laid out and tappable underneath the keyboard.
+            view.setPadding(0, 0, 0, maxOf(insets.getInsets(WindowInsets.Type.systemBars()).bottom,
+                insets.getInsets(WindowInsets.Type.ime()).bottom))
             insets
         }
         setContentView(layout)
@@ -324,6 +347,8 @@ class MainActivity : Activity() {
         super.onStart()
         MorpheCaptureGrant.observe(captureChanged)
         updateMorpheStatus()
+        queuePreferences.registerOnSharedPreferenceChangeListener(queueChanged)
+        refreshPhoneQueue()
     }
 
     override fun onResume() {
@@ -336,11 +361,13 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        queuePreferences.unregisterOnSharedPreferenceChangeListener(queueChanged)
         MorpheCaptureGrant.removeObserver(captureChanged)
         super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("queue_expanded", queueExpanded)
         outState.putString("search_query", searchInput.text.toString())
         outState.putBoolean("awaiting_controls", awaitingControls)
         outState.putBoolean("requesting_capture", requestingCapture)
@@ -377,6 +404,7 @@ class MainActivity : Activity() {
 
     private fun renderPhoneResults() {
         if (!::phoneResults.isInitialized) return
+        queueButtons.clear()
         phoneResults.removeAllViews()
         val source = searchSession.videos.take(if (searchSession.query.isBlank()) 8 else 30)
         if (searchSession.loading) phoneResults.addView(text("Searching YouTube…", 14f, gold))
@@ -405,16 +433,69 @@ class MainActivity : Activity() {
             row.addView(Button(this).apply {
                 text = if (queueStore.all().any { it.id == video.id }) "Queued" else "Queue"
                 isAllCaps = false
-                setOnClickListener { queueStore.toggle(video); updatePhoneQueueStatus(); renderPhoneResults() }
+                isEnabled = queueStore.all().none { it.id == video.id }
+                queueButtons[video.id] = this
+                setOnClickListener { queueStore.add(video); refreshPhoneQueue() }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
             row.addView(Button(this).apply {
                 text = if (playlistStore.contains("My karaoke mix", video.id)) "In mix" else "Mix"
                 isAllCaps = false
-                setOnClickListener { playlistStore.toggle("My karaoke mix", video); updatePhoneQueueStatus(); renderPhoneResults() }
+                setOnClickListener {
+                    val added = playlistStore.toggle("My karaoke mix", video)
+                    text = if (added) "In mix" else "Mix"
+                    updatePhoneQueueStatus()
+                }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
             phoneResults.addView(row)
             phoneResults.addView(space(6))
         }
+    }
+
+    private fun refreshPhoneQueue() {
+        if (!::queuePanel.isInitialized) return
+        updatePhoneQueueStatus()
+        val ids = queueStore.all().map { it.id }.toSet()
+        queueButtons.forEach { (id, button) ->
+            button.text = if (id in ids) "Queued" else "Queue"
+            button.isEnabled = id !in ids
+        }
+        renderQueue()
+    }
+
+    private fun renderQueue() {
+        queueToggle.text = if (queueExpanded) "Hide queue" else "Manage queue • ${queueStore.all().size} songs"
+        queuePanel.visibility = if (queueExpanded) View.VISIBLE else View.GONE
+        if (!queueExpanded) return
+        val previousScroll = phoneScroll.scrollY
+        queuePanel.removeAllViews()
+        val videos = queueStore.all()
+        if (videos.isEmpty()) queuePanel.addView(text("Your queue is empty. Search below and tap Queue.", 14f, muted))
+        videos.forEachIndexed { index, video ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(12), dp(12), dp(6))
+                background = panel(Color.rgb(28, 44, 57), 14)
+            }
+            card.addView(text("${index + 1}. ${video.title}", 15f, ink, true))
+            val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            fun control(label: String, enabled: Boolean = true, action: () -> Unit) {
+                controls.addView(Button(this).apply {
+                    text = label; isAllCaps = false; isEnabled = enabled
+                    setPadding(0, 0, 0, 0)
+                    setOnClickListener { action() }
+                }, LinearLayout.LayoutParams(0, dp(48), 1f))
+            }
+            control("Play on car") {
+                if (CarPlaybackLink.playVideo?.invoke(video) != true)
+                    Toast.makeText(this, "Open Car Lyrics in Android Auto to play your queue.", Toast.LENGTH_LONG).show()
+            }
+            control("Move up", index > 0) { queueStore.move(video.id, -1) }
+            control("Remove") { queueStore.remove(video.id) }
+            card.addView(controls)
+            queuePanel.addView(card)
+            queuePanel.addView(space(8))
+        }
+        phoneScroll.post { phoneScroll.scrollTo(0, previousScroll) }
     }
 
     private fun updatePhoneQueueStatus() {

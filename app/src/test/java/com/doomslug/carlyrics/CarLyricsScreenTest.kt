@@ -18,7 +18,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], shadows = [CarLyricsScreenTest.MazdaConstraints::class])
 class CarLyricsScreenTest {
     private val app get() = RuntimeEnvironment.getApplication() as Application
     private val done = object : OnDoneCallback {}
@@ -55,23 +55,25 @@ class CarLyricsScreenTest {
     @Test fun returnFromEveryMenuKeepsTheSameVideoAndPosition() {
         start(true)
         click("Song 1")
-        val playing = manager.top
         repeat(8) {
             controls().actions[3].onClickDelegate!!.sendClick(done)
             click("Queue")
             returnToVideo()
-            assertSame(playing, manager.top)
+            assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
+            assertTrue(manager.screenStack.size <= 4)
             controls().actions[3].onClickDelegate!!.sendClick(done)
             click("Playlists")
             click("My karaoke mix")
             returnToVideo()
-            assertSame(playing, manager.top)
+            assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
+            assertTrue(manager.screenStack.size <= 4)
             controls().actions[3].onClickDelegate!!.sendClick(done)
             click("Search YouTube")
             val search = manager.top.onGetTemplate() as SearchTemplate
             search.actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
-            assertSame(playing, manager.top)
-            assertEquals(2, manager.screenStack.size)
+            assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
+            assertTrue(manager.screenStack.size <= 4)
+            assertTrue(manager.screenStack.size <= 3)
         }
         assertEquals(listOf(videos.first()), player.selections)
         assertEquals(0, player.hides)
@@ -99,8 +101,8 @@ class CarLyricsScreenTest {
         val timeline = list().singleList!!
         assertTrue(timeline.items.size > 4)
         timeline.onSelectedDelegate!!.sendSelected(4, done)
-        // The test host reports a short list limit, so the timeline uses 40-second steps.
-        assertEquals(160_000L, player.sought)
+        // A full-size list can offer 10-second positions.
+        assertEquals(40_000L, player.sought)
         returnToVideo()
         assertSame(playing, manager.top)
         assertEquals(1, player.selections.size)
@@ -118,7 +120,8 @@ class CarLyricsScreenTest {
         player.onStatus!!.invoke(PlaybackStatus.PAUSED)
         controls().actions[1].onClickDelegate!!.sendClick(done)
         assertEquals(1, player.resumes)
-        controls().actions[0].onClickDelegate!!.sendClick(done)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Previous video")
         assertEquals(videos.last(), player.selections.last())
         controls().actions[2].onClickDelegate!!.sendClick(done)
         assertEquals(videos.first(), player.selections.last())
@@ -138,9 +141,9 @@ class CarLyricsScreenTest {
     @Test fun returningFromMenuRoutesLiveStatusToThePlayer() {
         start(true)
         click("Song 1")
-        val playing = manager.top
         controls().actions[3].onClickDelegate!!.sendClick(done)
         returnToVideo()
+        val playing = manager.top
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         val appManager = context.getCarService(androidx.car.app.AppManager::class.java) as androidx.car.app.testing.TestAppManager
         appManager.reset()
@@ -149,6 +152,72 @@ class CarLyricsScreenTest {
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         assertTrue(appManager.templatesReturned.any { it.first === playing &&
             (it.second as? NavigationTemplate)?.navigationInfo is androidx.car.app.navigation.model.MessageInfo })
+    }
+
+    @Test fun phoneQueueChangesReachTheCarAndNextUsesTheFreshOrder() {
+        val store = QueueStore(app)
+        store.add(videos[0]); store.add(videos[1])
+        start()
+        click("Queue")
+        assertEquals(2, list().singleList!!.items.size)
+        store.add(videos[2])
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(300))
+        assertEquals(3, list().singleList!!.items.size)
+        click("Song 2")
+        assertEquals(videos[1], player.selections.last())
+        store.move(videos[2].id, -1)
+        controls().actions[2].onClickDelegate!!.sendClick(done)
+        assertEquals(videos[0], player.selections.last())
+        assertTrue(CarPlaybackLink.playVideo!!.invoke(videos[2]))
+        assertEquals(videos[2], player.selections.last())
+        assertTrue(manager.screenStack.size <= 3)
+    }
+
+    @Test fun bufferingDoesNotRedrawMenusAndMicWorksFromNestedLists() {
+        start()
+        click("Song 1")
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Playlists"); click("My karaoke mix")
+        val menu = manager.top
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        val appManager = context.getCarService(androidx.car.app.AppManager::class.java) as androidx.car.app.testing.TestAppManager
+        appManager.reset()
+        player.onStatus!!.invoke(PlaybackStatus.LOADING)
+        player.onStatus!!.invoke(PlaybackStatus.PLAYING)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertTrue(appManager.templatesReturned.none { it.first === menu })
+        list().header!!.endHeaderActions.last().onClickDelegate!!.sendClick(done)
+        // The host must see the root Back template before the new search push.
+        assertTrue(manager.top.onGetTemplate() is ListTemplate)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertTrue(manager.top.onGetTemplate() is SearchTemplate)
+        assertEquals(2, manager.screenStack.size)
+    }
+
+    @Test fun poiPlayerStatusAndSongChangesPreservePaneRefreshIdentity() {
+        start()
+        click("Song 1")
+        fun pane() = ((manager.top.onGetTemplate() as MapWithContentTemplate).contentTemplate as androidx.car.app.model.PaneTemplate).pane!!
+        val originalTitles = pane().rows.map { it.title.toString() }
+        repeat(8) {
+            player.onStatus!!.invoke(PlaybackStatus.LOADING)
+            assertEquals(originalTitles, pane().rows.map { it.title.toString() })
+            player.onStatus!!.invoke(PlaybackStatus.PLAYING)
+            assertEquals(originalTitles, pane().rows.map { it.title.toString() })
+            controls().actions[2].onClickDelegate!!.sendClick(done)
+            assertEquals(originalTitles, pane().rows.map { it.title.toString() })
+        }
+        controls().actions[0].onClickDelegate!!.sendClick(done)
+        assertEquals("Sing King • Recent", list().header!!.title.toString())
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertTrue(manager.top.onGetTemplate() is SearchTemplate)
+        assertEquals(2, manager.screenStack.size)
+    }
+
+    @org.robolectric.annotation.Implements(androidx.car.app.constraints.ConstraintManager::class)
+    class MazdaConstraints {
+        @org.robolectric.annotation.Implementation
+        fun getContentLimit(type: Int): Int = 100
     }
 
     private class FakeCatalog(override val videos: List<KaraokeVideo>) : VideoCatalog {

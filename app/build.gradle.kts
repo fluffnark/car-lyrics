@@ -13,8 +13,8 @@ android {
         applicationId = "com.doomslug.carlyrics"
         minSdk = 29
         targetSdk = 36
-        versionCode = 16
-        versionName = "0.5.0"
+        versionCode = 17
+        versionName = "0.5.1"
         manifestPlaceholders["carAppCategory"] = "androidx.car.app.category.POI"
         buildConfigField("boolean", "FULLSCREEN_HOST", "false")
     }
@@ -49,6 +49,16 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-native-dev"
             matchingFallbacks += listOf("fullscreenProbe", "debug")
+        }
+        // Match the Play POI layout on the DHU without replacing the Play install.
+        create("poiProbe") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-poi-dev"
+            matchingFallbacks += "debug"
+            if (rootProject.file("signing/keystore.properties").exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             isMinifyEnabled = false

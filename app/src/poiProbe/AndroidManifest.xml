@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:label="Car Lyrics POI Dev" tools:replace="android:label">
+        <service android:name="com.doomslug.carlyrics.CarLyricsService" android:label="Car Lyrics POI Dev" tools:replace="android:label" />
+    </application>
+</manifest>

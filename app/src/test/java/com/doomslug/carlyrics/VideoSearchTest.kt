@@ -135,13 +135,18 @@ class VideoSearchTest {
         ((manager.top.onGetTemplate() as ListTemplate).singleList!!.items.first() as Row).onClickDelegate!!.sendClick(done)
         val search = manager.top.onGetTemplate() as SearchTemplate
         assertFalse(search.isShowKeyboardByDefault)
+        listOf("Queen", "", "Don't Stop", "Me Now by Queen").forEach {
+            search.searchCallbackDelegate.sendSearchTextChanged(it, done)
+        }
+        assertNull(reply)
+        assertEquals(2, manager.screenStack.size)
         search.searchCallbackDelegate.sendSearchSubmitted("Play Don't Stop Me Now by Queen", done)
         reply!!(VideoSearchResult(listOf(remoteSong)))
         // Real DHU host clears its old search field when its voice overlay closes.
         search.searchCallbackDelegate.sendSearchTextChanged("", done)
-        val results = manager.top.onGetTemplate() as ListTemplate
-        assertEquals("Play Don't Stop Me Now by Queen", results.header!!.title.toString())
-        val result = results.singleList!!.items.first() as Row
+        val results = manager.top.onGetTemplate() as SearchTemplate
+        assertEquals(2, manager.screenStack.size)
+        val result = results.itemList!!.items.first() as Row
         assertEquals(remoteSong.title, result.title.toString())
         result.onClickDelegate!!.sendClick(done)
         assertEquals(remoteSong, selected)

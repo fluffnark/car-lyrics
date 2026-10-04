@@ -55,16 +55,36 @@ class PlaylistStore(context: Context) {
 
 class QueueStore(context: Context) {
     private val prefs = context.getSharedPreferences("karaoke_queue", Context.MODE_PRIVATE)
-    private val playlistStore = PlaylistStore(context)
 
-    fun all(): List<KaraokeVideo> = playlistStore.run {
+    fun all(): List<KaraokeVideo> {
         val root = runCatching { JSONArray(prefs.getString("items", "[]")) }.getOrDefault(JSONArray())
-        (0 until root.length()).mapNotNull { index ->
+        return (0 until root.length()).mapNotNull { index ->
             val item = root.optJSONObject(index) ?: return@mapNotNull null
             val id = item.optString("id")
             val title = item.optString("title")
             if (KaraokeVideo.ID.matches(id) && title.isNotBlank()) KaraokeVideo(id, title) else null
-        }
+        }.distinctBy { it.id }
+    }
+
+    /** Queue is an add operation. A second tap must not silently remove a song. */
+    fun add(video: KaraokeVideo): Boolean {
+        if (!KaraokeVideo.ID.matches(video.id) || video.title.isBlank()) return false
+        val items = all()
+        if (items.any { it.id == video.id }) return false
+        write(items + video)
+        return true
+    }
+
+    fun remove(id: String) { write(all().filterNot { it.id == id }) }
+
+    fun move(id: String, delta: Int) {
+        val items = all().toMutableList()
+        val index = items.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val target = (index + delta).coerceIn(items.indices)
+        if (index == target) return
+        items.add(target, items.removeAt(index))
+        write(items)
     }
 
     fun toggle(video: KaraokeVideo): Boolean {
@@ -72,9 +92,13 @@ class QueueStore(context: Context) {
         val existing = updated.indexOfFirst { it.id == video.id }
         val added = existing < 0
         if (added) updated.add(video) else updated.removeAt(existing)
-        val json = JSONArray()
-        updated.forEach { json.put(JSONObject().put("id", it.id).put("title", it.title)) }
-        prefs.edit().putString("items", json.toString()).apply()
+        write(updated)
         return added
+    }
+
+    private fun write(items: List<KaraokeVideo>) {
+        val json = JSONArray()
+        items.forEach { json.put(JSONObject().put("id", it.id).put("title", it.title)) }
+        prefs.edit().putString("items", json.toString()).apply()
     }
 }
