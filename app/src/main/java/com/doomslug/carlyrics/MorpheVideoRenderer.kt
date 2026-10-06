@@ -35,6 +35,8 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
     private var height = height
     private var outputWidth = 0
     private var outputHeight = 0
+    private var outputDpi = 160
+    private var compactHeader = false
     private var visibleArea: Rect? = null
     private var hasFrame = false
     private var frames = 0
@@ -116,6 +118,7 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
         runCatching {
             outputWidth = container.width
             outputHeight = container.height
+            outputDpi = container.dpi
             visibleArea = area?.let(::Rect)
             output = EGL14.eglCreateWindowSurface(egl, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
             check(output != EGL14.EGL_NO_SURFACE) { "Car output error ${EGL14.eglGetError()}" }
@@ -132,6 +135,13 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
         }
     }
 
+    fun setCompactHeader(enabled: Boolean) { handler.post {
+        if (compactHeader != enabled) {
+            compactHeader = enabled
+            runCatching { draw() }.onFailure { Log.w(TAG, "Video layout failed", it); detachOutput() }
+        }
+    } }
+
     fun detach() { handler.post { detachOutput() } }
     private fun detachOutput() {
         current(parking)
@@ -146,7 +156,9 @@ internal class MorpheVideoRenderer(width: Int, height: Int) {
         GLES20.glViewport(0, 0, outputWidth, outputHeight)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        val viewport = VideoViewport.fit(outputWidth, outputHeight, width, height, visibleArea)
+        val viewport = if (compactHeader) VideoViewport.fitCompactHeader(
+            outputWidth, outputHeight, width, height, visibleArea, outputDpi)
+        else VideoViewport.fit(outputWidth, outputHeight, width, height, visibleArea)
         if (viewport.isEmpty) {
             EGL14.eglSwapBuffers(egl, output)
             return

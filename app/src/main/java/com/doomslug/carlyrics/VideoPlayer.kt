@@ -12,6 +12,9 @@ interface VideoPlayer : SurfaceCallback {
     val timeline: VideoTimeline? get() = null
     fun seekTo(positionMs: Long) = Unit
     fun recoverVideo() = Unit
+    fun prepare() = Unit
+    fun setCompactHeader(enabled: Boolean) = Unit
+    fun videoToSave(selected: KaraokeVideo?): KaraokeVideo? = selected
     fun select(video: KaraokeVideo)
     fun pause()
     fun resume()

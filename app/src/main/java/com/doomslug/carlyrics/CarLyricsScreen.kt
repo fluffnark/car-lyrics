@@ -113,6 +113,7 @@ class CarLyricsScreen private constructor(
         if (!session.surfaceRegistered) {
             carContext.getCarService(AppManager::class.java).setSurfaceCallback(player)
             session.surfaceRegistered = true
+            player.prepare()
         }
         if (catalog === SingKingCatalog) {
             SingKingCatalog.initialize(carContext)
@@ -179,7 +180,7 @@ class CarLyricsScreen private constructor(
             menu("Queue", "${queueStore.all().size} songs • added from your phone") { open(Mode.QUEUE) }
             menu("Playlists", "My mix, warm-up, and duets") { open(Mode.PLAYLISTS) }
             menu("Genres & albums", "Browse curated Sing King collections") { open(Mode.COLLECTIONS) }
-            menu("Saved songs", "Your saved karaoke videos") { open(Mode.BROWSE, source = Source.SAVED) }
+            menu("Favorites", "Your saved karaoke videos") { open(Mode.BROWSE, source = Source.SAVED) }
         }
         if (session.hasVideo && activeCollection == null && source == Source.RECENT) {
             menu("Previous video", "Go back in the current playing list") { step(-1); returnToPlayer() }
@@ -211,7 +212,7 @@ class CarLyricsScreen private constructor(
         val list = ItemList.Builder()
         rows.take(contentLimit()).forEach(list::addItem)
         return ListTemplate.Builder()
-            .setHeader(header(activeCollection?.title ?: if (source == Source.RECENT) "Sing King • Recent" else "Saved songs").build())
+            .setHeader(header(activeCollection?.title ?: if (source == Source.RECENT) "Sing King • Recent" else "Favorites").build())
             .setSingleList(list.build()).build()
     }
 
@@ -332,8 +333,11 @@ class CarLyricsScreen private constructor(
             )).setOnClickListener { if (pausable) player.pause() else player.resume() }.build()
             // Pane refresh rules require stable row titles. Putting Loading /
             // Playing / Paused in the title consumes a task step on each change.
-            val compactPane = Pane.Builder().addRow(Row.Builder()
-                .setTitle("Morphe").addText(state).build())
+            val compactHeader = player.statusDetail == null
+            player.setCompactHeader(compactHeader && !fullscreenHost)
+            val statusRow = Row.Builder().setTitle("Morphe")
+            if (!compactHeader) statusRow.addText(state)
+            val compactPane = Pane.Builder().addRow(statusRow.build())
             if (player.statusDetail != null) compactPane.addAction(Action.Builder().setTitle("Phone setup")
                 .setOnClickListener {
                     runCatching {
@@ -356,7 +360,8 @@ class CarLyricsScreen private constructor(
             // and when the knob-accessible transport buttons hide/reappear.
             val tools = ActionStrip.Builder()
                 .addAction(Action.Builder().setIcon(icon(R.drawable.ic_seek)).setOnClickListener { open(Mode.SEEK) }.build())
-                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_refresh)).setOnClickListener { player.recoverVideo() }.build()).build()
+                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_refresh)).setOnClickListener { player.recoverVideo() }.build())
+                .addAction(favoriteAction(current)).build()
             if (fullscreenHost) {
                 val builder = NavigationTemplate.Builder().setActionStrip(controls).setMapActionStrip(tools)
                 player.statusDetail?.let {
@@ -369,16 +374,7 @@ class CarLyricsScreen private constructor(
                 .setContentTemplate(PaneTemplate.Builder(compactPane.build()).build())
                 .setActionStrip(controls).build()
         }
-        val savedAction = Action.Builder()
-            .setTitle(if (current != null && playlists.contains("My karaoke mix", current.id)) "In mix" else "Add to mix")
-            .setIcon(icon(R.drawable.ic_saved))
-            .setOnClickListener {
-                current?.let { video ->
-                    saved.toggle(video)
-                    playlists.toggle("My karaoke mix", video)
-                }
-                invalidate()
-            }.build()
+        val savedAction = favoriteAction(current)
         val queueAction = Action.Builder()
             .setTitle(if (current != null && queueStore.all().any { it.id == current.id }) "Queued" else "Queue")
             .setOnClickListener { current?.let { queueStore.toggle(it) }; invalidate() }.build()
@@ -391,6 +387,25 @@ class CarLyricsScreen private constructor(
         return MapWithContentTemplate.Builder()
             .setContentTemplate(PaneTemplate.Builder(pane.build()).build())
             .setActionStrip(strip).build()
+    }
+
+    private fun favoriteAction(video: KaraokeVideo?): Action {
+        val playing = player.videoToSave(video)
+        return Action.Builder()
+        .setIcon(icon(if (playing != null && saved.contains(playing.id)) R.drawable.ic_saved else R.drawable.ic_favorite_outline))
+        .setOnClickListener {
+            val current = player.videoToSave(video)
+            if (current == null) {
+                androidx.car.app.CarToast.makeText(carContext,
+                    "Select this video in Car Lyrics to save it", androidx.car.app.CarToast.LENGTH_LONG).show()
+            } else current.let {
+                val added = saved.toggle(it)
+                androidx.car.app.CarToast.makeText(carContext,
+                    if (added) "Saved to Favorites" else "Removed from Favorites",
+                    androidx.car.app.CarToast.LENGTH_SHORT).show()
+                invalidate()
+            }
+        }.build()
     }
 
     private fun icon(resource: Int) = CarIcon.Builder(IconCompat.createWithResource(carContext, resource)).build()

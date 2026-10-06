@@ -69,6 +69,7 @@ class MorpheProjectionService : Service() {
             captureHeight = (metrics.heightPixels * scale).toInt().coerceAtLeast(1)
             val videoRenderer = MorpheVideoRenderer(captureWidth, captureHeight)
             renderer = videoRenderer
+            videoRenderer.setCompactHeader(MorpheCaptureGrant.useCompactHeader)
             display = capture.createVirtualDisplay("Car Lyrics Morphe mirror",
                 captureWidth, captureHeight, metrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, videoRenderer.input, null, main)
@@ -103,6 +104,7 @@ class MorpheProjectionService : Service() {
     }
 
     internal fun updateVisibleArea(area: Rect) { renderer?.setVisibleArea(area) }
+    internal fun setCompactHeader(enabled: Boolean) { renderer?.setCompactHeader(enabled) }
 
     override fun onDestroy() {
         if (MorpheCaptureGrant.service === this) MorpheCaptureGrant.service = null

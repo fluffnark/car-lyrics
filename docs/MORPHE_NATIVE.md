@@ -1,6 +1,10 @@
 # Native Morphe rendering
 
-## Implemented and tested — October 4, 2026
+## Current update — October 5, 2026
+
+V18 adds player Favorites, a larger split-view viewport, and earlier Shizuku binding. See [release evidence and limitations](RELEASE_V18.md). POI Dev v18 matches the standard release host; the Pixel’s Play app remains v17 until updated through Play. The v16 evidence below used the separate navigation-host experiment.
+
+## Initial implementation — October 4, 2026
 
 Car Lyrics **0.5.0 (16)** now includes an opt-in **Shizuku user service**. It runs the installed Morphe YouTube on a dedicated trusted virtual display and routes that display’s Surface through the existing OpenGL renderer to Android Auto. It does not use MediaProjection, reinstall Morphe, or copy account credentials. The phone still runs Morphe; no APK is installed into the Mazda itself.
 
@@ -43,10 +47,10 @@ Morphe’s existing **Settings → Player → Open videos in fullscreen mode →
 
 ### Implementation
 
-- `NativeMorpheService.java`: shell-privileged Shizuku user service, fixed 1280×720@160 display. Only the owning app UID can call create/play/release. Video IDs are validated; the launch target is fixed to Morphe. No arbitrary command API is exposed. Binder death and explicit close release the display; display removal destroys its activities rather than moving them onto the passenger’s phone.
-- `MorpheNativeDisplay.kt`: asynchronous bind/create/launch, latest pending selection, bind timeout, persistent input Surface, output replacement, and Repair picture. Creating a new native session and using Repair both restart only Morphe to reset its retained compact-layout state; media-session seek restores the saved time after the new process is ready, because a cold launch can ignore URL timestamps. The non-daemon helper belongs to the car app’s session.
+- `NativeMorpheService.java`: shell-privileged Shizuku user service, fixed 1280×720@320 display. Only the owning app UID can call create/play/release. Video IDs are validated; the launch target is fixed to Morphe. No arbitrary command API is exposed. Binder death and explicit close release the display; display removal destroys its activities rather than moving them onto the passenger’s phone.
+- `MorpheNativeDisplay.kt`: prebinding while browsing, background graphics initialization, asynchronous create/launch, latest pending selection, bind timeout, persistent input Surface, output replacement, and Repair picture. Creating a new native session and using Repair both restart only Morphe to reset its retained compact-layout state; media-session seek restores the saved time after the new process is ready, because a cold launch can ignore URL timestamps. The non-daemon helper belongs to the car app’s session.
 - `MorpheScreenShare.kt`: common VideoPlayer adapter for native mode and projection backup; media session supplies playback state, time, and seek. A song selected before backup permission is granted starts once after approval.
-- `VideoViewport.kt` / `MorpheVideoRenderer.kt`: aspect fit inside the host’s visible rectangle, preserving the entire frame in split mode. A stable 16:9 native input avoids phone-orientation changes resizing the car source.
+- `VideoViewport.kt` / `MorpheVideoRenderer.kt`: aspect fit inside the host’s visible rectangle, with an additional below-header region for the one-row POI player. The right/bottom host boundaries remain intact; the 112 dp header clearance is verified on the Mazda DHU profile and needs real-host retesting. A stable 16:9 native input avoids phone-orientation changes resizing the car source.
 - `CarLyricsScreen.kt`: one playback session shared by a real ScreenManager stack, persistent Now playing actions, resumed-screen status updates, knob-selectable timeline and Repair picture. This addresses template-stack mistakes that can consume AA’s task quota; it does not remove host restrictions.
 
 The trusted/own-focus/no-steal/destroy-on-removal flags come from [AOSP DisplayManager](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android17-release/core/java/android/hardware/display/DisplayManager.java). The shell launch uses Android’s [multi-display activity policy](https://source.android.com/docs/core/display/multi_display/activity-launch). See [Shizuku user-service API](https://github.com/RikkaApps/Shizuku-API), [SurfaceCallback visible-area rules](https://developer.android.com/reference/androidx/car/app/SurfaceCallback), and [Screen task quota/back behavior](https://developer.android.com/reference/androidx/car/app/Screen).
@@ -56,7 +60,7 @@ The trusted/own-focus/no-steal/destroy-on-removal flags come from [AOSP DisplayM
 1. Repeat reconnect, aspect fit and Commander navigation on the actual Mazda; confirm screen geometry/density. Expanded app view is host-controlled, and split view remains supported.
 2. Verify Shizuku restart after reboot, lock/screen-off behavior, service death and permission loss. Hidden privileged APIs make future Android versions an explicit compatibility gate.
 3. Measure audio/video offset with a known sync reference. Morphe supplies the original audio and video; native rendering adds its own frame path.
-4. Automatic queue advancement and ownership of Morphe’s autoplay remain unfinished. Manual Next/Previous follow the list selected in Car Lyrics; new phone queue additions require reopening Queue and selecting it again.
+4. Automatic queue advancement and ownership of Morphe’s autoplay remain unfinished. Manual Next/Previous follow the list selected in Car Lyrics and read fresh queue/playlist contents.
 5. Repeat car voice recognition against native playback with a real cabin microphone. V14 DHU voice recognition and the shared submitted-query → result → player code are verified; the phone microphone and cabin acoustics are not.
 
 No guarantee is made for every YouTube video or public Play eligibility. Account/region restrictions and Morphe’s own playback limitations still apply. The earlier standalone display probe is retained in [tools/native-display-probe](../tools/native-display-probe/README.md).

@@ -19,9 +19,13 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     override fun seekTo(positionMs: Long) { MorpheMediaAccess.seekTo(context, positionMs) }
     override fun recoverVideo() {
         // Reopen the same URL at the current position without consuming capture consent again.
-        val current = video ?: return
+        val selected = video ?: return
+        val playing = videoToSave(selected)
+        val current = playing ?: selected
         val time = timeline
-        val position = if (time != null && time.positionMs < time.durationMs) time.positionMs else 0
+        // Do not apply an autoplay video's position to the previously selected URL.
+        val position = if (playing != null && time != null && time.positionMs < time.durationMs) time.positionMs else 0
+        video = current
         if (nativeMode) {
             val controller = MorpheMediaAccess.controller(context)
             recovery = MorpheRecovery(controller?.sessionToken, position,
@@ -54,6 +58,7 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     private var waitingForSetup = false
     private var recovery: MorpheRecovery? = null
     private var lastDetail: String? = null
+    private var lastMetadataTitle: String? = null
     private val prefs = context.getSharedPreferences("car_lyrics", 0)
     private val nativeMode get() = MorpheNativeDisplay.enabled(context)
     private var nativeDisplay: MorpheNativeDisplay? = null
@@ -84,6 +89,7 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
 
     override fun onSurfaceAvailable(container: SurfaceContainer) { main.post {
         if (closed) return@post
+        Log.i("CarLyricsMorphe", "car surface=${container.width}x${container.height}@${container.dpi}")
         this.container = container
         if (nativeMode) native.attach(container) else MorpheCaptureGrant.attach(container)
     } }
@@ -101,6 +107,22 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
             }
         }
     }
+
+    override fun onStableAreaChanged(stableArea: Rect) {
+        Log.i("CarLyricsMorphe", "stable car area=$stableArea")
+    }
+
+    override fun prepare() {
+        if (!closed && nativeMode && MorpheNativeDisplay.authorized()) native.prepare()
+    }
+
+    override fun setCompactHeader(enabled: Boolean) {
+        if (nativeMode) native.setCompactHeader(enabled)
+        else MorpheCaptureGrant.setCompactHeader(enabled)
+    }
+
+    override fun videoToSave(selected: KaraokeVideo?): KaraokeVideo? =
+        MorpheMediaAccess.videoToSave(MorpheMediaAccess.controller(context)?.metadata, selected)
 
     override fun select(video: KaraokeVideo) {
         if (closed || !KaraokeVideo.ID.matches(video.id)) return
@@ -165,9 +187,11 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
         else update(MorpheMediaAccess.status(MorpheMediaAccess.controller(context)?.playbackState))
     }
     private fun update(next: PlaybackStatus) {
-        if (next != status || lastDetail != statusDetail) {
+        val title = MorpheMediaAccess.controller(context)?.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+        if (next != status || lastDetail != statusDetail || title != lastMetadataTitle) {
             status = next
             lastDetail = statusDetail
+            lastMetadataTitle = title
             Log.i("CarLyricsMorphe", "playback=$next")
             onStatus?.invoke(next)
         }

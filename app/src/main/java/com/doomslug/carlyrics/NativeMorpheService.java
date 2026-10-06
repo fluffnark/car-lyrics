@@ -65,7 +65,10 @@ public final class NativeMorpheService extends INativeMorphe.Stub {
             lifetime = client;
             lifetime.linkToDeath(death, 0);
             display = shell.getSystemService(DisplayManager.class).createVirtualDisplay(
-                "Car Lyrics native Morphe", 1280, 720, 160, surface,
+                // 320 dpi gives Morphe a 640x360 dp landscape phone layout.
+                // 160 dpi advertised a 1280x720 dp tablet, allowing its compact
+                // watch layout instead of the phone's landscape fullscreen player.
+                "Car Lyrics native Morphe", 1280, 720, 320, surface,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | trusted | ownFocus | keepFocus | destroyContent, null, handler);
             if (display == null) throw new IllegalStateException("Display creation failed");
             return display.getDisplay().getDisplayId();

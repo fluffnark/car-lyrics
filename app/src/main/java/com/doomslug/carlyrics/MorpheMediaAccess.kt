@@ -30,6 +30,26 @@ class MorpheMediaAccess : NotificationListenerService() {
             PlaybackState.STATE_STOPPED -> PlaybackStatus.ENDED
             else -> PlaybackStatus.LOADING
         }
+        /** Prefer the playing video's ID, including Morphe autoplay. Some builds
+         * omit it; in that case never silently save a different, previously selected song. */
+        fun videoToSave(metadata: MediaMetadata?, selected: KaraokeVideo?): KaraokeVideo? {
+            metadata ?: return null
+            val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim().orEmpty()
+            val mediaId = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+            val mediaUri = metadata.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
+            val id = listOfNotNull(mediaId, mediaUri).firstNotNullOfOrNull { value ->
+                if (KaraokeVideo.ID.matches(value)) value else runCatching {
+                    val uri = android.net.Uri.parse(value)
+                    when (uri.host?.lowercase()) {
+                        "youtu.be" -> uri.pathSegments.firstOrNull()
+                        "youtube.com", "www.youtube.com", "m.youtube.com" -> uri.getQueryParameter("v")
+                        else -> null
+                    }?.takeIf { KaraokeVideo.ID.matches(it) }
+                }.getOrNull()
+            }
+            if (id != null && title.isNotBlank()) return KaraokeVideo(id, title)
+            return selected?.takeIf { title.isNotBlank() && it.title.trim().equals(title, ignoreCase = true) }
+        }
         fun timeline(context: Context): VideoTimeline? {
             val controller = controller(context) ?: return null
             val state = controller.playbackState ?: return null

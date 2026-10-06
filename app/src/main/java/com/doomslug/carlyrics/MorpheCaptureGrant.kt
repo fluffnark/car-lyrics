@@ -8,6 +8,7 @@ object MorpheCaptureGrant {
     internal var service: MorpheProjectionService? = null
     internal var target: SurfaceContainer? = null
     internal var visibleArea: Rect? = null
+    internal var useCompactHeader = false
     var isGranted = false
         private set
     var message = "Start Morphe sharing on your phone"
@@ -29,6 +30,10 @@ object MorpheCaptureGrant {
     fun updateVisibleArea(area: Rect) {
         visibleArea = Rect(area)
         service?.updateVisibleArea(area)
+    }
+    fun setCompactHeader(enabled: Boolean) {
+        useCompactHeader = enabled
+        service?.setCompactHeader(enabled)
     }
     fun detach(container: SurfaceContainer) {
         if (target?.surface == container.surface) {

@@ -14,6 +14,28 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MorpheMediaAccessTest {
+    @Test fun favoritesFollowMorpheAutoplayMetadataInsteadOfThePreviousSelection() {
+        val previous = KaraokeVideo("9Lxm0iSnKNc", "Previous video")
+        val metadata = android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, "Current video")
+            .putString(android.media.MediaMetadata.METADATA_KEY_MEDIA_ID, "dqIil7XK3V4").build()
+        assertEquals(KaraokeVideo("dqIil7XK3V4", "Current video"), MorpheMediaAccess.videoToSave(metadata, previous))
+        val uri = android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, "Current video")
+            .putString(android.media.MediaMetadata.METADATA_KEY_MEDIA_URI, "https://www.youtube.com/watch?v=dqIil7XK3V4").build()
+        assertEquals("dqIil7XK3V4", MorpheMediaAccess.videoToSave(uri, previous)!!.id)
+    }
+
+    @Test fun missingVideoIdCannotSaveAStaleSelection() {
+        val selected = KaraokeVideo("9Lxm0iSnKNc", "Selected video")
+        fun title(value: String) = android.media.MediaMetadata.Builder()
+            .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, value).build()
+        assertNull(MorpheMediaAccess.videoToSave(null, selected))
+        assertNull(MorpheMediaAccess.videoToSave(title("Autoplay video"), selected))
+        assertNull(MorpheMediaAccess.videoToSave(title(""), selected))
+        assertEquals(selected, MorpheMediaAccess.videoToSave(title("Selected video"), selected))
+    }
+
     @Test fun controlsSelectMorpheWhenAnotherPlayerIsAlsoActive() {
         val app = RuntimeEnvironment.getApplication()
         val manager = shadowOf(app.getSystemService(MediaSessionManager::class.java))

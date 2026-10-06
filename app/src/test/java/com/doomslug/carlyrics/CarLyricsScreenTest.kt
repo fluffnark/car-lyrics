@@ -78,6 +78,7 @@ class CarLyricsScreenTest {
         assertEquals(listOf(videos.first()), player.selections)
         assertEquals(0, player.hides)
         assertEquals(0, player.closes)
+        assertEquals(1, player.prepares)
     }
 
     @Test fun backReturnsTheOriginalTemplateAndMenuContent() {
@@ -214,6 +215,27 @@ class CarLyricsScreenTest {
         assertEquals(2, manager.screenStack.size)
     }
 
+    @Test fun playerFavoriteTogglesWithoutRestartingAndAppearsInFavorites() {
+        start()
+        click("Song 1")
+        fun favorite() = (manager.top.onGetTemplate() as MapWithContentTemplate).mapController!!.mapActionStrip!!.actions[2]
+        val original = favorite().icon
+        favorite().onClickDelegate!!.sendClick(done)
+        assertTrue(SavedVideos(app).contains(videos.first().id))
+        assertNotEquals(original, favorite().icon)
+        assertEquals(1, player.selections.size)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Favorites")
+        click("Song 1")
+        favorite().onClickDelegate!!.sendClick(done)
+        assertFalse(SavedVideos(app).contains(videos.first().id))
+        val map = (manager.top.onGetTemplate() as MapWithContentTemplate).mapController!!
+        assertEquals(3, map.mapActionStrip!!.actions.size)
+        assertTrue(player.hasCompactHeader)
+        val pane = ((manager.top.onGetTemplate() as MapWithContentTemplate).contentTemplate as androidx.car.app.model.PaneTemplate).pane!!
+        assertTrue(pane.rows.single().texts.isEmpty())
+    }
+
     @org.robolectric.annotation.Implements(androidx.car.app.constraints.ConstraintManager::class)
     class MazdaConstraints {
         @org.robolectric.annotation.Implementation
@@ -227,11 +249,15 @@ class CarLyricsScreenTest {
     }
     private class FakePlayer : VideoPlayer {
         override val compactControls = true
+        var hasCompactHeader = false
+        override fun setCompactHeader(enabled: Boolean) { hasCompactHeader = enabled }
         override var onStatus: ((PlaybackStatus) -> Unit)? = null
         override val timeline = VideoTimeline(20_000, 240_000, true)
         var detail: String? = null
         override val statusDetail get() = detail
         val selections = mutableListOf<KaraokeVideo>()
+        var prepares = 0
+        override fun prepare() { prepares++ }
         var pauses = 0; var resumes = 0; var hides = 0; var closes = 0; var repairs = 0
         var sought = -1L
         override fun select(video: KaraokeVideo) { selections += video }

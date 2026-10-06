@@ -10,6 +10,37 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class VideoViewportTest {
+    @Test fun mazdaSplitPlayerUsesTheSpaceBelowItsCompactHeader() {
+        val visible = Rect(440, 92, 678, 448)
+        val old = VideoViewport.fit(770, 460, 1280, 720, visible)
+        val fit = VideoViewport.fitCompactHeader(770, 460, 1280, 720, visible, 160)
+        assertEquals(238, old.width())
+        assertEquals(597, fit.width())
+        assertEquals(336, fit.height())
+        assertTrue(Rect(12, 112, 678, 448).contains(fit))
+        assertEquals(Rect(440, 92, 678, 448), visible)
+    }
+
+    @Test fun compactHeaderRespectsMediaCardOnAFullWidthSurface() {
+        val split = VideoViewport.fitCompactHeader(1190, 460, 1280, 720, Rect(440, 92, 678, 448), 160)
+        assertTrue(split.right <= 678)
+        val full = VideoViewport.fitCompactHeader(1190, 460, 1280, 720, Rect(440, 92, 1098, 448), 160)
+        assertTrue(full.width() > split.width())
+        assertTrue(Rect(440, 92, 1098, 448).contains(full))
+    }
+
+    @Test fun compactHeaderScalesWithDensityAndFallsBackWhenGeometryIsUnknown() {
+        val doubled = VideoViewport.fitCompactHeader(1540, 920, 1280, 720, Rect(880, 184, 1356, 896), 320)
+        assertTrue(Rect(24, 224, 1356, 896).contains(doubled))
+        listOf(null, Rect(), Rect(0, 0, 770, 460), Rect(1200, 0, 1500, 400)).forEach {
+            assertEquals(VideoViewport.fit(1190, 460, 1280, 720, it),
+                VideoViewport.fitCompactHeader(1190, 460, 1280, 720, it, 160))
+        }
+        val short = Rect(440, 92, 678, 98)
+        assertEquals(VideoViewport.fit(770, 100, 1280, 720, short),
+            VideoViewport.fitCompactHeader(770, 100, 1280, 720, short, 160))
+    }
+
     @Test fun dashboardMediaCardCannotCoverTheVideo() {
         // The host still supplies a full-width surface while its right card overlays it.
         val area = Rect(0, 0, 770, 460)

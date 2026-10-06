@@ -25,6 +25,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
     private var renderer: MorpheVideoRenderer? = null
     private var target: SurfaceContainer? = null
     private var visible: Rect? = null
+    private var compactHeader = false
     private var bound = false
     private var closed = false
     private var pending: Pair<KaraokeVideo, Long>? = null
@@ -42,7 +43,9 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
             if (closed || binder == null) return
             remote = INativeMorphe.Stub.asInterface(binder)
             main.removeCallbacks(bindTimeout)
-            initializeDisplay()
+            // Binding while browsing is cheap and must not stop phone playback.
+            // Create the Morphe display only after an explicit video selection.
+            if (pending != null) initializeDisplay()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             remote = null
@@ -62,6 +65,10 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         if (target?.surface == container.surface) { target = null; visible = null; renderer?.detach() }
     }
     fun visibleArea(area: Rect) { visible = Rect(area); renderer?.setVisibleArea(area) }
+    fun setCompactHeader(enabled: Boolean) {
+        compactHeader = enabled
+        renderer?.setCompactHeader(enabled)
+    }
     fun play(video: KaraokeVideo, positionMs: Long = 0, recover: Boolean = false) {
         if (closed) return
         pending = video to positionMs
@@ -70,6 +77,11 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         if (recover && remote != null) { ready = false; initializeDisplay(); return }
         if (ready) { dispatchPending(); return }
         if (remote != null && !initializing) { initializeDisplay(); return }
+        prepare()
+        changed()
+    }
+    fun prepare() {
+        if (closed || !authorized() || remote != null) return
         if (!bound) {
             try {
                 bound = true
@@ -77,7 +89,6 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
                 main.postDelayed(bindTimeout, 12_000)
             } catch (error: Exception) { bound = false; failed(error) }
         }
-        changed()
     }
     private val bindTimeout: Runnable = Runnable {
         if (!closed && remote == null) {
@@ -90,23 +101,30 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         val service = remote ?: return
         if (initializing) return
         initializing = true
-        try { if (renderer == null) renderer = MorpheVideoRenderer(1280, 720) }
-        catch (error: Exception) { initializing = false; failed(error); return }
-        val output = renderer!!
-        target?.let { output.attach(it, visible) }
+        val previousRenderer = renderer
         worker.execute {
-            runCatching { service.create(output.input, lifetime) }
-                .onSuccess { id -> main.post {
+            var output: MorpheVideoRenderer? = previousRenderer
+            val started = android.os.SystemClock.elapsedRealtime()
+            runCatching {
+                if (output == null) output = MorpheVideoRenderer(1280, 720)
+                service.create(output!!.input, lifetime)
+            }.onSuccess { id -> main.post {
                     if (!closed) {
-                        Log.i(TAG, "native display=$id 1280x720")
+                        renderer = output
+                        output!!.setCompactHeader(compactHeader)
+                        target?.let { output!!.attach(it, visible) }
+                        Log.i(TAG, "native display=$id 1280x720@320 readyMs=${android.os.SystemClock.elapsedRealtime() - started}")
                         ready = true
                         initializing = false
                         failure = null
                         dispatchPending()
                         changed()
-                    }
+                    } else if (output !== previousRenderer) output?.close()
                 } }
-                .onFailure { error -> main.post { failed(error) } }
+                .onFailure { error ->
+                    if (output !== previousRenderer) output?.close()
+                    main.post { failed(error) }
+                }
         }
     }
     private fun dispatchPending() {
@@ -114,8 +132,9 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         val service = remote ?: return
         pending = null
         worker.execute {
+            val started = android.os.SystemClock.elapsedRealtime()
             runCatching { service.play(request.first.id, request.second) }
-                .onSuccess { Log.i(TAG, "native video=${request.first.id}") }
+                .onSuccess { Log.i(TAG, "native video=${request.first.id} launchMs=${android.os.SystemClock.elapsedRealtime() - started}") }
                 .onFailure { error -> main.post { failed(error) } }
         }
     }
