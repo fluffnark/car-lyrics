@@ -109,11 +109,12 @@ internal object SpotifyImporter {
                 }
                 lists = store.all()
                 cache.putAll(lists.flatMap { it.songs }.filter { it.video != null || it.state == "missing" }.associateBy { it.song.key })
+                var consecutiveErrors = 0
                 for ((number, p) in lists.withIndex()) {
                     if (cancelled) break
                     var playlist = p
                     if (playlist.problem != null && playlist.songs.isEmpty()) continue
-                    for (index in playlist.songs.indices) {
+                    for (index in playlist.songs.indices.sortedBy { playlist.songs[it].state == "error" }) {
                         if (cancelled) break
                         val row = playlist.songs[index]
                         if (row.video != null || (row.state == "missing" && System.currentTimeMillis() - row.checkedAt < 7 * 86_400_000L)) continue
@@ -126,10 +127,23 @@ internal object SpotifyImporter {
                                 Thread.sleep(400)
                                 val query = "${row.song.artists.firstOrNull().orEmpty()} ${row.song.title} karaoke".take(200)
                                 var attempt = YouTubeSearch.fetch(query)
-                                repeat(2) { if (attempt.error != null && !cancelled) { Thread.sleep(2_000); attempt = YouTubeSearch.fetch(query) } }
+                                repeat(2) { if (attempt.error != null && !cancelled &&
+                                        attempt.error?.contains("HTTP 429") != true && attempt.error?.contains("HTTP 403") != true) {
+                                    Thread.sleep(2_000); attempt = YouTubeSearch.fetch(query)
+                                } }
                                 attempt
                             } else VideoSearchResult(listOf(local))
-                            if (remote.error != null) throw IllegalStateException("Karaoke search unavailable. Saved progress is safe; tap Resume.")
+                            if (remote.error != null) {
+                                playlist = playlist.copy(songs = playlist.songs.toMutableList().apply {
+                                    set(index, row.copy(state = "error", checkedAt = System.currentTimeMillis()))
+                                })
+                                store.put(playlist)
+                                consecutiveErrors++
+                                if (consecutiveErrors >= 3 || remote.error.contains("HTTP 429") || remote.error.contains("HTTP 403"))
+                                    throw IllegalStateException("${remote.error} Saved progress is safe; tap Resume.")
+                                continue
+                            }
+                            consecutiveErrors = 0
                             val video = local ?: KaraokeMatcher.match(row.song, remote.videos)
                             SpotifyMatch(row.song, video, if (video == null) "missing" else "matched", System.currentTimeMillis())
                         }
@@ -140,7 +154,7 @@ internal object SpotifyImporter {
                 }
                 val all = store.all()
                 update(if (cancelled) "Paused · ${all.sumOf { it.matched }} karaoke matches saved" else
-                    "${all.size} playlists · ${all.sumOf { it.matched }} karaoke matches\n${all.count { it.problem != null }} playlists need attention")
+                    "${all.size} playlists · ${all.sumOf { it.matched }} karaoke matches\n${all.count { it.problem != null }} playlists need attention · ${all.sumOf { p -> p.songs.count { it.state == "error" } }} checks need retry")
             } catch (e: Exception) { update(if (e is java.io.IOException) "Network interrupted. Saved progress is safe; tap Resume to retry."
                 else e.message?.take(200) ?: "Import paused. Tap Resume to retry.") }
             finally { running = false; main.post { observers.toList().forEach { it() } } }

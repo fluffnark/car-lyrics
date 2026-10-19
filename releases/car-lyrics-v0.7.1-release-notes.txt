@@ -1,0 +1,1 @@
+Car playlist pages open at the first entry and show 20 entries for easier rotary browsing. A failed karaoke lookup can be retried without blocking the rest of a playlist; clearer connection errors preserve saved progress.

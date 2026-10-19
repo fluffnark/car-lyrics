@@ -36,6 +36,7 @@ class CarLyricsScreen private constructor(
     private val source: Source = Source.RECENT,
     private val activeCollection: KaraokeCollection? = null,
     private val activePlaylist: KaraokePlaylist? = null,
+    private val initialPlaylistPage: Int = 0,
 ) : Screen(context), DefaultLifecycleObserver {
     constructor(
         context: CarContext,
@@ -64,7 +65,7 @@ class CarLyricsScreen private constructor(
     private val queueStore = QueueStore(context)
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private var editingSearch = false
-    private var playlistPage = 0
+    private var playlistPage = initialPlaylistPage
     private val queuePreferences = context.getSharedPreferences("karaoke_queue", 0)
     private val playlistPreferences = context.getSharedPreferences("karaoke_playlists", 0)
     private val queueChanged = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -308,37 +309,49 @@ class CarLyricsScreen private constructor(
     private fun playlistsTemplate(): Template {
         val list = ItemList.Builder()
         val all = playlists.all()
-        val pageSize = (contentLimit() - 2).coerceAtLeast(1)
+        val pageSize = (contentLimit() - 2).coerceIn(1, 20)
         playlistPage = playlistPage.coerceAtMost((all.size - 1).coerceAtLeast(0) / pageSize)
         all.drop(playlistPage * pageSize).take(pageSize).forEach { playlist ->
             list.addItem(Row.Builder().setTitle(playlist.name.substringBefore(" · Spotify [")).addText(playlist.detail ?: "${playlist.videos.size} karaoke songs")
                 .setOnClickListener { open(Mode.PLAYLIST, playlist = playlist) }.build())
         }
         pageRows(list, all.size, pageSize)
-        return ListTemplate.Builder().setHeader(header("Your playlists").build())
+        return ListTemplate.Builder().setHeader(header(pageTitle("Your playlists", all.size, pageSize)).build())
             .setSingleList(list.build()).build()
     }
 
     private fun playlistTemplate(): Template {
         val playlist = playlists.all().firstOrNull { it.name == activePlaylist?.name } ?: return playlistsTemplate()
         val list = ItemList.Builder().setNoItemsMessage(playlist.detail ?: "Add songs in the phone app")
-        val pageSize = (contentLimit() - 2).coerceAtLeast(1)
+        val pageSize = (contentLimit() - 2).coerceIn(1, 20)
         playlistPage = playlistPage.coerceAtMost((playlist.videos.size - 1).coerceAtLeast(0) / pageSize)
         playlist.videos.drop(playlistPage * pageSize).take(pageSize).forEach { video ->
             list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("${playlist.name.substringBefore(" · Spotify [")} • karaoke")
                 .setOnClickListener { select(playlist.videos, playlist.videos.indexOf(video), playlist.name) }.build())
         }
         pageRows(list, playlist.videos.size, pageSize)
-        return ListTemplate.Builder().setHeader(header(playlist.name.substringBefore(" · Spotify [")).build())
+        return ListTemplate.Builder().setHeader(header(pageTitle(playlist.name.substringBefore(" · Spotify ["), playlist.videos.size, pageSize)).build())
             .setSingleList(list.build()).build()
     }
 
+    private fun pageTitle(title: String, total: Int, size: Int): String =
+        if (total <= size) title else "$title · ${playlistPage + 1}/${(total + size - 1) / size}"
+
     private fun pageRows(list: ItemList.Builder, total: Int, size: Int) {
         if (playlistPage > 0) list.addItem(Row.Builder().setTitle("Previous page")
-            .setOnClickListener { playlistPage--; invalidate() }.build())
+            .setOnClickListener { changePlaylistPage(playlistPage - 1) }.build())
         if ((playlistPage + 1) * size < total) list.addItem(Row.Builder().setTitle("More songs / playlists")
             .addText("${(playlistPage + 1) * size} of $total")
-            .setOnClickListener { playlistPage++; invalidate() }.build())
+            .setOnClickListener { changePlaylistPage(playlistPage + 1) }.build())
+    }
+
+    private fun changePlaylistPage(next: Int) {
+        if (manager.top !== this) return
+        // A template refresh retains the host's old scroll/focus index. A fresh
+        // screen resets it, while replacing this page keeps the car stack bounded.
+        manager.pop()
+        manager.push(CarLyricsScreen(carContext, catalog, session, saved, remoteSearch, fullscreenHost,
+            mode, source, activeCollection, activePlaylist, next))
     }
 
     private fun playerTemplate(): Template {

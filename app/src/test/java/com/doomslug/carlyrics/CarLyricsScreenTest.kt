@@ -100,11 +100,30 @@ class CarLyricsScreenTest {
         (1..120).forEach { n -> imports.put(SpotifyPlaylist("%022d".format(n), "Imported %03d".format(n), songs.size,
             (if (n == 120) songs else emptyList()).map { SpotifyMatch(SpotifySong(it.id, it.title, listOf("Artist")), it, "matched") })) }
         start(); click("Playlists")
+        val firstPage = manager.top
+        val firstTitle = list().header!!.title.toString()
+        val initialDepth = manager.screenStack.size
         assertTrue(list().singleList!!.items.size <= 100)
         click("More songs / playlists")
+        assertNotSame(firstPage, manager.top)
+        assertNotEquals(firstTitle, list().header!!.title.toString())
+        assertEquals(initialDepth, manager.screenStack.size)
+        assertEquals("Imported 018", (list().singleList!!.items.first() as Row).title.toString())
+        click("Previous page")
+        assertEquals(initialDepth, manager.screenStack.size)
+        click("More songs / playlists")
+        while (list().singleList!!.items.any { (it as Row).title.toString() == "More songs / playlists" }) {
+            click("More songs / playlists")
+            assertEquals(initialDepth, manager.screenStack.size)
+            assertTrue(list().singleList!!.items.size <= 22)
+        }
         click("Imported 120")
         assertTrue(list().singleList!!.items.size <= 100)
-        click("More songs / playlists"); click("More songs / playlists")
+        val songDepth = manager.screenStack.size
+        while (list().singleList!!.items.any { (it as Row).title.toString() == "More songs / playlists" }) {
+            click("More songs / playlists")
+            assertEquals(songDepth, manager.screenStack.size)
+        }
         click("Imported song 220")
         assertEquals(songs.last(), player.selections.last())
         assertEquals(1, player.selections.size)

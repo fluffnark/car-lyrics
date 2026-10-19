@@ -14,5 +14,10 @@
     "APK signature",
     "AAB signature"
   ],
-  "builtAt": "2026-10-19T04:08:32.766216+00:00"
+  "builtAt": "2026-10-19T04:08:32.766216+00:00",
+  "playPublishedAt": "2026-10-18T22:12:00-06:00",
+  "officialInstalledAt": "2026-10-18T22:26:43-06:00",
+  "officialInstaller": "com.android.vending",
+  "officialPlayCertificateSha256": "951ebe45ed00c2cb66cab5a4ad21e0f6a892e98c54fa8338e7039bd789bd7fb7",
+  "officialSpotifyConnected": true
 }

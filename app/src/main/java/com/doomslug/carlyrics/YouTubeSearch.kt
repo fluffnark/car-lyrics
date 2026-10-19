@@ -40,7 +40,7 @@ object YouTubeSearch : VideoSearch {
                     setRequestProperty("Accept-Language", "en-US,en;q=0.8")
                 }
                 try {
-                    check(connection.responseCode == 200)
+                    if (connection.responseCode != 200) throw SearchHttpFailure(connection.responseCode)
                     val html = connection.inputStream.bufferedReader().use { reader ->
                         val out = StringBuilder()
                         val buffer = CharArray(8192)
@@ -55,9 +55,20 @@ object YouTubeSearch : VideoSearch {
                     VideoSearchResult(YouTubeSearchParser.parse(html))
                 } finally { connection.disconnect() }
             }.getOrElse {
-                VideoSearchResult(emptyList(), "YouTube search unavailable. Check your connection and retry.")
+                val reason = when (it) {
+                    is SearchHttpFailure -> "HTTP ${it.code}"
+                    is java.net.SocketTimeoutException -> "connection timed out"
+                    is java.net.UnknownHostException -> "no internet connection"
+                    else -> when (it.message) {
+                        "Search response too large", "Search data missing", "Search content missing", "Search format changed" -> "search page changed"
+                        else -> "connection interrupted"
+                    }
+                }
+                VideoSearchResult(emptyList(), "YouTube search unavailable ($reason). Retry later.")
             }
 }
+
+private class SearchHttpFailure(val code: Int) : java.io.IOException()
 
 internal object YouTubeSearchParser {
     private val initialData = Regex("(?:var\\s+ytInitialData|window\\[\"ytInitialData\"\\]|window\\['ytInitialData'\\])\\s*=\\s*")

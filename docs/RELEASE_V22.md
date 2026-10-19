@@ -28,4 +28,8 @@ Final bundle: `releases/car-lyrics-v0.7.0.aab`, SHA256 `3f574aa1f7f7a1ae457e1468
 
 Published 22 (0.7.0) to the existing Play Internal testing track on October 18, 2026 at 10:12 PM Denver time. Console confirmed Available to internal testers. No supported devices were lost; the single warning was the absent deobfuscation file (shrinking is disabled). The earlier 21 candidate was removed from the draft before publication. Production and existing closed-track drafts were left alone.
 
-Official installation is being verified.
+Updated the official Pixel package through Play at 10:26:43 PM Denver time. Package manager reports 0.7.0 (22), installer `com.android.vending`. The installed APK signature matches the previous Play certificate: `951ebe45ed00c2cb66cab5a4ad21e0f6a892e98c54fa8338e7039bd789bd7fb7`. No uninstall or app-data clear was used. Ready/native mode and the existing queue were preserved.
+
+Completed Spotify browser sign-in on the phone in the official package and started its first import. Development and official imports are separate; development test progress was paused before starting the official import. A manual match selection was also exercised in the development copy and retained the correct video.
+
+The final official build was also opened in the DHU. Its 119 imported playlists appeared with coverage labels, including the five public previews, and the first page exposed More at 98 of 122 albums. The host applied its normal Safety pause after sustained rotary scrolling.
