@@ -11,3 +11,5 @@ A single failed karaoke search is saved for retry while subsequent songs continu
 Final candidate bundle: `releases/car-lyrics-v0.7.1.aab`, SHA256 `5110d393a14d544ca427e68d056455fa07904aeb8d523205956842848c05ba94`.
 
 Uploaded candidate 23 (0.7.1) to a Play Internal testing draft. It has not been published or installed in the official package. Official installed release remains 0.7.0 (22); its 119 imported playlists and connected Spotify account are saved. Final head-unit check and official Play update are pending Pixel USB reconnection.
+
+Candidate 23 was removed from the draft on October 19 and superseded by published 24/25. It was never published.

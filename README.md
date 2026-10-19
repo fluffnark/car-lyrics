@@ -1,17 +1,17 @@
 # Car Lyrics
 
-Spotify karaoke imports: open **Albums → Spotify playlists → Connect Spotify**, then **Refresh playlists**. All playlist pages are inventoried; available title-and-artist karaoke matches appear as albums on phone and car. **Resume matching** keeps saved work, **Import CSV** handles complete exported lists, and import details let you choose corrections through search. Public embed previews are labelled whenever full coverage cannot be verified. See [v22 validation and release record](docs/RELEASE_V22.md).
+Spotify karaoke imports: open **Playlists → Spotify Import & matching → Connect Spotify**, then **Import playlists**. All playlist pages are inventoried; available title-and-artist karaoke matches appear as albums on phone and car. **Continue matching** keeps saved work, **Import CSV** handles complete exported lists, and import details let you choose corrections through search. Public embed previews are labelled whenever full coverage cannot be verified. See [v22 validation and release record](docs/RELEASE_V22.md).
 
 
 Private Android Auto karaoke prototype for a 2021 Mazda CX-5, using the installed **Morphe YouTube** app on the phone as its player. Car Lyrics opens selected YouTube URLs in Morphe on a dedicated native display, renders that display on the car surface, and controls Morphe’s media session. Android screen sharing remains available as a backup. Your existing Morphe login stays in Morphe.
 
-## Current Play release — 0.7.0 (22), October 18, 2026
+## Current Play release — 0.8.1 (25), October 19, 2026
 
-**Car Lyrics 0.7.0 (22)** is published on the existing Play internal testing track. Spotify playlist import is available in Albums; the release passed 51 tests, debug/release lint and signature checks. See [v22 verification](docs/RELEASE_V22.md) for installation and head-unit evidence. The separate POI Dev copy remains available for development.
+**Car Lyrics 0.8.1 (25)** is published on the existing Play internal testing track. Playlists have artwork, name filtering, empty creation and a song editor. Spotify karaoke playlists can be copied into editable mixes. Matching accepts provider annotations, collaborators and remasters, tries an alternate search and rechecks old misses. The progress screen distinguishes unchecked songs, misses and failed searches. The release passed 53 tests, debug/release lint and signature checks. See [v25 verification](docs/RELEASE_V25.md).
 
 - **Recovery:** accurate setup status distinguishes stopped Shizuku, missing authorization, missing Morphe, and missing playback controls. Open Shizuku and Repair picture/reconnect are available on the phone. A live Shizuku restart can reconnect an existing car session and restore its selected song, position and paused state.
-- **Minimal UI:** compact connection status, flat thumbnail rows, Explore / Queue / Albums tabs, and a single song menu. Search filters and setup details open only when needed. The car player has four main controls; seek, repair, and favorites are in Browse.
-- **Passenger search:** thumbnails, karaoke preference, provider preference, and library-only search; each result has **Play now**, **Play next**, **Queue**, and **Add to album**. Named albums/playlists are local, persist across reload, and appear on both phone and car. Repeated adds do not remove songs.
+- **Minimal UI:** compact connection status, flat thumbnail rows, Explore / Queue / Playlists tabs, and a single song menu. Search filters and setup details open only when needed. The car player has four main controls; seek, repair, and favorites are in Browse.
+- **Passenger search:** thumbnails, karaoke preference, provider preference, and library-only search; each result has **Play now**, **Play next**, **Queue**, and **Add to playlist**. Named albums/playlists are local, persist across reload, and appear on both phone and car. Repeated adds do not remove songs.
 - **USB tools:** `./tools/caraoke doctor`, `repair`, `reload`, and `logs` locate the SDK/phone and current Shizuku starter. Reload updates only the separate Dev copy with `adb install -r`, preserving queues and settings. Use `--serial` when several devices are connected.
 
 Shizuku was stopped after the phone had rebooted. Its installed **Start on boot (root)** setting does not establish automatic startup on this unrooted phone. Start Shizuku through wireless debugging after a reboot, or use the USB repair command. Shizuku itself must be running before Car Lyrics can attach.
@@ -115,7 +115,7 @@ Outputs:
 - `app/build/outputs/apk/poiProbe/app-poiProbe.apk` — **Car Lyrics POI Dev**, same layout/category as release, separate test package.
 - `app/build/outputs/apk/nativeProbe/app-nativeProbe.apk` — side-by-side **Car Lyrics Native Dev**, local navigation-host experiment. Do not upload this variant to Play.
 - `app/build/outputs/apk/release/app-release.apk` — standard POI prototype, locally upload-key signed. It cannot replace the Play-signed app by ADB on this Pixel.
-- `app/build/outputs/bundle/release/app-release.aab` — **0.7.0 (22)**, signed release bundle published to the existing Play internal track on October 18; installed through Play on the Pixel. The POI Dev test build matches the standard host category.
+- `app/build/outputs/bundle/release/app-release.aab` — **0.8.1 (25)**, signed release bundle published to the existing Play internal track on October 19. The POI Dev test build matches the standard host category.
 
 The upload key is configured in ignored `signing/keystore.properties`; keep the key and credentials private and backed up. The local ADB install is suitable for DHU testing. Use the Play internal-track installation for the Mazda launcher test, as previously configured.
 

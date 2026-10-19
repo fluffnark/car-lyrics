@@ -13,6 +13,9 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.PopupMenu
+import android.view.Gravity
+import android.graphics.drawable.GradientDrawable
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.concurrent.Executors
@@ -23,6 +26,7 @@ class SpotifyImportActivity : Activity() {
     private val ink = Color.rgb(237, 242, 240)
     private val muted = Color.rgb(150, 167, 171)
     private lateinit var body: LinearLayout
+    private var reviewing = false
     private val changed: () -> Unit = { if (!isDestroyed) render() }
     override fun onCreate(state: Bundle?) { super.onCreate(state); SpotifyImporter.observe(changed); render() }
     override fun onResume() { super.onResume(); render() }
@@ -32,7 +36,7 @@ class SpotifyImportActivity : Activity() {
         text = value; textSize = size; setTextColor(color); setPadding(4, 16, 4, 16)
     }
     private fun action(value: String, enabled: Boolean = true, click: () -> Unit) = Button(this).apply {
-        text = value; isAllCaps = false; setTextColor(mint); backgroundTintList = ColorStateList.valueOf(Color.rgb(29, 40, 45))
+        text = value; isAllCaps = false; setTextColor(mint); background = null; minHeight = (48 * resources.displayMetrics.density).toInt()
         isEnabled = enabled; setOnClickListener { click() }
     }
     private fun render() {
@@ -43,34 +47,54 @@ class SpotifyImportActivity : Activity() {
             v.setPadding(48 + bars.left, 20 + bars.top, 48 + bars.right, 30 + bars.bottom); insets
         }
         scroll.addView(body); setContentView(scroll)
-        body.addView(label("Spotify playlists", 27f))
+        val lists = SpotifyImportStore(this).all()
+        val rows = lists.flatMap { it.songs }
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(action("‹  Playlists") { finish() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        heading.addView(action("•••") {
+            PopupMenu(this, heading.getChildAt(1)).apply {
+                if (!SpotifyImporter.running) {
+                    if (SpotifyAccount.connected(this@SpotifyImportActivity)) menu.add("Refresh Spotify playlists").setOnMenuItemClickListener { SpotifyImporter.start(this@SpotifyImportActivity); true }
+                    if (lists.isNotEmpty()) menu.add("Recheck unmatched songs").setOnMenuItemClickListener { SpotifyImporter.start(this@SpotifyImportActivity, refresh = false, retryMissing = true); true }
+                    menu.add("Import CSV").setOnMenuItemClickListener {
+                        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), 4120); true
+                    }
+                    if (SpotifyAccount.connected(this@SpotifyImportActivity)) menu.add("Disconnect Spotify").setOnMenuItemClickListener { SpotifyAccount.disconnect(this@SpotifyImportActivity); render(); true }
+                }
+                show()
+            }
+        }.apply { contentDescription = "Import options" })
+        body.addView(heading)
         body.addView(android.widget.ImageView(this).apply {
             setImageResource(R.drawable.spotify_logo); contentDescription = "Spotify"
             scaleType = android.widget.ImageView.ScaleType.FIT_START
-        }, LinearLayout.LayoutParams((110 * resources.displayMetrics.density).toInt(), (30 * resources.displayMetrics.density).toInt()).apply { bottomMargin = 24 })
-        body.addView(label(SpotifyImporter.status.ifBlank { SpotifyAccount.status ?: "Add karaoke versions to your library" }, 14f, muted))
-        if (!SpotifyAccount.connected(this)) body.addView(action("Connect Spotify", !SpotifyImporter.running) {
-            runCatching { SpotifyAccount.connect(this) }.onFailure { message(it.message ?: "Could not connect") }
-        })
-        if (SpotifyImporter.running) body.addView(action("Pause import") { SpotifyImporter.stop() })
-        else {
-            if (SpotifyAccount.connected(this)) body.addView(action("Refresh playlists") { SpotifyImporter.start(this) })
-            if (SpotifyImportStore(this).all().isNotEmpty()) body.addView(action("Resume matching") { SpotifyImporter.start(this, refresh = false) })
-            body.addView(action("Import CSV") {
-                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), 4120)
-            })
+        }, LinearLayout.LayoutParams((110 * resources.displayMetrics.density).toInt(), (30 * resources.displayMetrics.density).toInt()).apply { topMargin = 32; bottomMargin = 32 })
+        body.addView(label("Karaoke for your playlists", 25f))
+        body.addView(label(if (lists.isEmpty()) "Find karaoke versions, then play them here or in the car." else "${lists.size} playlists saved", 14f, muted))
+        if (rows.isNotEmpty()) {
+            body.addView(label("${rows.count { it.video != null }}", 42f, mint))
+            body.addView(label("karaoke matches", 15f, muted))
+            val pending = rows.count { it.video == null && it.state != "missing" && it.state != "error" }
+            val missing = rows.count { it.video == null && it.state == "missing" }
+            val errors = rows.count { it.video == null && it.state == "error" }
+            body.addView(label("$pending still to check  ·  $missing no match  ·  $errors to retry", 13f, muted))
         }
-        val lists = SpotifyImportStore(this).all()
-        if (lists.isEmpty()) body.addView(label("Connect to import your playlists. Followed playlists restricted by Spotify can be added from a CSV export.", 14f, muted))
-        if (SpotifyImporter.running) body.addView(label("${lists.size} playlists · ${lists.sumOf { it.matched }} karaoke matches saved", 14f, muted))
-        (if (SpotifyImporter.running) emptyList() else lists).forEach { p ->
+        val status = SpotifyImporter.status.ifBlank { if (rows.any { it.video == null && it.state == "pending" }) "Matching is unfinished. Continue to check the remaining songs." else "Saved matches stay in your library." }
+        body.addView(label(status, 14f, muted))
+        val primary = when {
+            SpotifyImporter.running -> action("Pause matching") { SpotifyImporter.stop() }
+            !SpotifyAccount.connected(this) && lists.isEmpty() -> action("Connect Spotify") { runCatching { SpotifyAccount.connect(this) }.onFailure { message(it.message ?: "Could not connect") } }
+            lists.isEmpty() -> action("Import playlists") { SpotifyImporter.start(this) }
+            else -> action("Continue matching") { SpotifyImporter.start(this, refresh = false) }
+        }
+        primary.background = GradientDrawable().apply { setColor(Color.rgb(29, 40, 45)); cornerRadius = 28 * resources.displayMetrics.density }
+        body.addView(primary)
+        if (lists.any { it.problem != null }) body.addView(label("${lists.count { it.problem != null }} playlists have partial or restricted source lists. CSV can fill the gaps.", 13f, muted))
+        if (!SpotifyImporter.running && lists.isNotEmpty()) body.addView(action(if (reviewing) "Hide song details" else "Review songs & choose versions") { reviewing = !reviewing; render() })
+        if (reviewing && !SpotifyImporter.running) lists.forEach { p ->
             body.addView(label(p.name, 18f).apply { setOnClickListener { showPlaylist(p) } })
             body.addView(label(p.summary, 13f, muted).apply { setOnClickListener { showPlaylist(p) } })
         }
-        if (SpotifyAccount.connected(this) && !SpotifyImporter.running) body.addView(action("Disconnect") {
-            SpotifyAccount.disconnect(this); render()
-        })
-        body.addView(action("Done") { finish() })
     }
     private fun showPlaylist(p: SpotifyPlaylist) {
         val labels = p.songs.map { "${if (it.video != null) "✓" else if (it.state == "missing") "—" else "…"} ${it.song.title} · ${it.song.artists.joinToString()}" }

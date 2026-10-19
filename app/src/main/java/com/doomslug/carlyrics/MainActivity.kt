@@ -50,6 +50,9 @@ class MainActivity : Activity() {
     private lateinit var queueToggle: Button
     private enum class Page { SEARCH, QUEUE, ALBUMS }
     private var page = Page.SEARCH
+    private var openedPlaylist: String? = null
+    private var playlistQuery = ""
+    private var changingSearch = false
     private lateinit var exploreTab: Button
     private lateinit var albumsTab: Button
     private lateinit var albumsPanel: LinearLayout
@@ -76,7 +79,7 @@ class MainActivity : Activity() {
     }
     private lateinit var morpheStatus: TextView
     private lateinit var sharingButton: Button
-    private val thumbnailViews = mutableMapOf<String, ImageView>()
+    private val thumbnailViews = mutableMapOf<String, MutableList<ImageView>>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val binderReceived = Shizuku.OnBinderReceivedListener { runOnUiThread { updateMorpheStatus() } }
     private val binderDead = Shizuku.OnBinderDeadListener { runOnUiThread { updateMorpheStatus() } }
@@ -96,12 +99,16 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (android.os.Build.VERSION.SDK_INT >= 33) onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { if (!closePlaylist()) finish() }
         Shizuku.addRequestPermissionResultListener(nativePermissionResult)
         Shizuku.addBinderReceivedListener(binderReceived)
         Shizuku.addBinderDeadListener(binderDead)
         awaitingControls = savedInstanceState?.getBoolean("awaiting_controls") ?: false
         awaitingNative = savedInstanceState?.getBoolean("awaiting_native") ?: false
         requestingCapture = savedInstanceState?.getBoolean("requesting_capture") ?: false
+        playlistQuery = savedInstanceState?.getString("playlist_query").orEmpty()
+        openedPlaylist = savedInstanceState?.getString("opened_playlist")
         page = Page.entries.getOrElse(savedInstanceState?.getInt("phone_page", 0) ?: 0) { Page.SEARCH }
         morpheStatus = text("", 15f, muted)
         sharingButton = quietButton("") {}
@@ -147,14 +154,19 @@ class MainActivity : Activity() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (s?.isNotBlank() == true && page != Page.SEARCH) showPage(Page.SEARCH)
-                    searchSession.update(s?.toString().orEmpty())
+                    if (changingSearch) return
+                    if (page == Page.ALBUMS) {
+                        playlistQuery = s?.toString().orEmpty(); openedPlaylist = null; renderAlbums()
+                    } else {
+                        if (s?.isNotBlank() == true && page != Page.SEARCH) showPage(Page.SEARCH)
+                        searchSession.update(s?.toString().orEmpty())
+                    }
                 }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
             setOnEditorActionListener { _, action, _ ->
                 if (action == EditorInfo.IME_ACTION_SEARCH) {
-                    searchSession.update(text.toString(), submitted = true)
+                    if (page != Page.ALBUMS) searchSession.update(text.toString(), submitted = true)
                     hideKeyboard()
                     true
                 } else false
@@ -168,7 +180,7 @@ class MainActivity : Activity() {
         val tabs = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         exploreTab = quietButton("Explore") { showPage(Page.SEARCH) }
         queueToggle = quietButton("Queue") { showPage(Page.QUEUE) }
-        albumsTab = quietButton("Albums") { showPage(Page.ALBUMS) }
+        albumsTab = quietButton("Playlists") { showPage(Page.ALBUMS) }
         listOf(exploreTab, queueToggle, albumsTab).forEach {
             tabs.addView(it, LinearLayout.LayoutParams(0, dp(48), 1f))
         }
@@ -217,9 +229,14 @@ class MainActivity : Activity() {
             savedInstanceState?.getBoolean("library_only", false) ?: false)
         val restored = intent.getStringExtra("search_query") ?: savedInstanceState?.getString("search_query").orEmpty()
         val restoredPage = page
+        changingSearch = true
         searchInput.setText(restored)
+        changingSearch = false
         searchSession.update(restored, options = options)
+        val restoredPlaylist = openedPlaylist
         showPage(restoredPage)
+        openedPlaylist = restoredPlaylist
+        if (page == Page.ALBUMS) renderAlbums()
         updateMorpheStatus()
         updateNowPlaying()
         if (SingKingCatalog.videos.isEmpty() || SingKingCatalog.isStale()) SingKingCatalog.refresh { updateCatalog() }
@@ -232,7 +249,17 @@ class MainActivity : Activity() {
     }
 
     private fun showPage(next: Page) {
+        val previousPage = page
         page = next
+        openedPlaylist = null
+        if (::searchInput.isInitialized) {
+            changingSearch = true
+            searchInput.hint = if (page == Page.ALBUMS) "Find playlists" else "Search songs or artists"
+            searchInput.contentDescription = searchInput.hint
+            if (page == Page.ALBUMS) searchInput.setText(playlistQuery)
+            else if (previousPage == Page.ALBUMS) searchInput.setText(searchSession.query)
+            changingSearch = false
+        }
         if (!::phoneResults.isInitialized) return
         phoneResults.visibility = if (page == Page.SEARCH) View.VISIBLE else View.GONE
         queuePanel.visibility = if (page == Page.QUEUE) View.VISIBLE else View.GONE
@@ -501,6 +528,8 @@ class MainActivity : Activity() {
         outState.putString("search_query", searchInput.text.toString())
         outState.putBoolean("awaiting_controls", awaitingControls)
         outState.putBoolean("requesting_capture", requestingCapture)
+        outState.putString("playlist_query", playlistQuery)
+        outState.putString("opened_playlist", openedPlaylist)
         super.onSaveInstanceState(outState)
     }
 
@@ -557,7 +586,7 @@ class MainActivity : Activity() {
         if (source.isEmpty() && !searchSession.loading) phoneResults.addView(text(
             if (searchSession.query.isBlank()) "Find a song to get started." else "No songs found. Try another search.", 15f, muted).apply { setPadding(dp(4), dp(28), 0, 0) })
         source.forEach { video -> phoneResults.addView(songRow(video)) }
-        Thumbnails.request(source) { if (!isDestroyed) thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let(view::setImageBitmap) } }
+        Thumbnails.request(source) { if (!isDestroyed) thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let { bitmap -> view.forEach { it.setImageBitmap(bitmap) } } } }
     }
 
     private fun displayTitle(title: String) = title
@@ -565,7 +594,7 @@ class MainActivity : Activity() {
         .replace(Regex("\\s*\\|\\s*Karaoke Version\\s*\\|", RegexOption.IGNORE_CASE), " ·")
         .trim()
 
-    private fun songRow(video: KaraokeVideo, queueIndex: Int? = null): View {
+    private fun songRow(video: KaraokeVideo, queueIndex: Int? = null, album: KaraokePlaylist? = null): View {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, dp(10))
@@ -579,8 +608,8 @@ class MainActivity : Activity() {
             background = panel(Color.rgb(29, 40, 45), 8)
             clipToOutline = true
             setImageBitmap(Thumbnails.get(video.id))
-            if ((page == Page.SEARCH && queueIndex == null) || (page == Page.QUEUE && queueIndex != null))
-                thumbnailViews[video.id] = this
+            if ((page == Page.SEARCH && queueIndex == null) || (page == Page.QUEUE && queueIndex != null) || page == Page.ALBUMS)
+                thumbnailViews.getOrPut(video.id) { mutableListOf() }.add(this)
         }, LinearLayout.LayoutParams(dp(88), dp(52)).apply { marginEnd = dp(12) })
         val title = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         title.addView(text(displayTitle(video.title), 15f, ink).apply {
@@ -594,11 +623,11 @@ class MainActivity : Activity() {
             })
         }
         row.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(iconButton(R.drawable.ic_more, "More actions: ${video.title}") { anchor -> songActions(anchor, video, queueIndex) })
+        row.addView(iconButton(R.drawable.ic_more, "More actions: ${video.title}") { anchor -> songActions(anchor, video, queueIndex, album) })
         return row
     }
 
-    private fun songActions(anchor: View, video: KaraokeVideo, queueIndex: Int? = null) {
+    private fun songActions(anchor: View, video: KaraokeVideo, queueIndex: Int? = null, album: KaraokePlaylist? = null) {
         hideKeyboard()
         PopupMenu(this, anchor).apply {
             val importedPlaylist = intent.getStringExtra("match_playlist")
@@ -619,7 +648,13 @@ class MainActivity : Activity() {
                 isEnabled = !queued
                 setOnMenuItemClickListener { queueStore.add(video); refreshPhoneQueue(); true }
             }
-            menu.add("Add to album").setOnMenuItemClickListener { chooseAlbum(video); true }
+            menu.add("Add to playlist").setOnMenuItemClickListener { chooseAlbum(video); true }
+            if (album != null && album.spotifyId == null) {
+                val index = album.videos.indexOfFirst { it.id == video.id }
+                if (index > 0) menu.add("Move up").setOnMenuItemClickListener { playlistStore.move(album.name, video.id, -1); renderAlbums(); true }
+                if (index < album.videos.lastIndex) menu.add("Move down").setOnMenuItemClickListener { playlistStore.move(album.name, video.id, 1); renderAlbums(); true }
+                menu.add("Remove from playlist").setOnMenuItemClickListener { playlistStore.remove(album.name, video.id); renderAlbums(); true }
+            }
             if (queueIndex != null) {
                 if (queueIndex > 0) menu.add("Move up").setOnMenuItemClickListener { queueStore.move(video.id, -1); true }
                 if (queueIndex < queueStore.all().lastIndex) menu.add("Move down").setOnMenuItemClickListener { queueStore.move(video.id, 1); true }
@@ -646,17 +681,17 @@ class MainActivity : Activity() {
             updatePhoneQueueStatus()
             Toast.makeText(this, if (added) "Added to $name" else "Already in $name", Toast.LENGTH_SHORT).show()
         }
-        showDialog(AlertDialog.Builder(this).setTitle("Add to album")
-            .setItems((names + "New album…").toTypedArray()) { _, index ->
+        showDialog(AlertDialog.Builder(this).setTitle("Add to playlist")
+            .setItems((names + "New playlist…").toTypedArray()) { _, index ->
                 if (index < names.size) add(names[index])
                 else {
                     val input = EditText(this).apply {
-                        hint = "Album name"; setSingleLine(true); setTextColor(ink)
+                        hint = "Playlist name"; setSingleLine(true); setTextColor(ink)
                         backgroundTintList = ColorStateList.valueOf(mint)
                     }
                     val body = LinearLayout(this).apply { setPadding(dp(24), 0, dp(24), 0) }
                     body.addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
-                    val dialog = showDialog(AlertDialog.Builder(this).setTitle("New album").setView(body)
+                    val dialog = showDialog(AlertDialog.Builder(this).setTitle("New playlist").setView(body)
                         .setNegativeButton("Cancel", null).setPositiveButton("Add", null))
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         val name = input.text.toString().trim().take(80)
@@ -684,58 +719,122 @@ class MainActivity : Activity() {
         val videos = queueStore.all()
         if (videos.isEmpty()) queuePanel.addView(text("Your queue is empty. Add songs from ⋮.", 15f, muted).apply { setPadding(dp(4), dp(28), 0, 0) })
         videos.forEachIndexed { index, video -> queuePanel.addView(songRow(video, index)) }
-        Thumbnails.request(videos) { if (!isDestroyed) thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let(view::setImageBitmap) } }
+        Thumbnails.request(videos) { if (!isDestroyed) thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let { bitmap -> view.forEach { it.setImageBitmap(bitmap) } } } }
         phoneScroll.post { phoneScroll.scrollTo(0, previousScroll) }
+    }
+
+    private fun closePlaylist(): Boolean {
+        if (page != Page.ALBUMS || openedPlaylist == null) return false
+        openedPlaylist = null; renderAlbums(); phoneScroll.scrollTo(0, 0)
+        return true
+    }
+
+    @android.annotation.SuppressLint("GestureBackNavigation") // API 33+ uses OnBackInvokedDispatcher above.
+    @Deprecated("Only Android 10–12 uses this fallback")
+    override fun onBackPressed() { if (!closePlaylist()) super.onBackPressed() }
+
+    private fun playlistNameDialog(title: String, initial: String = "", save: (String) -> Boolean) {
+        val input = EditText(this).apply {
+            hint = "Playlist name"; setSingleLine(true); setText(initial); setTextColor(ink)
+            backgroundTintList = ColorStateList.valueOf(mint)
+        }
+        val body = LinearLayout(this).apply { setPadding(dp(24), 0, dp(24), 0); addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56))) }
+        val dialog = showDialog(AlertDialog.Builder(this).setTitle(title).setView(body)
+            .setNegativeButton("Cancel", null).setPositiveButton("Save", null))
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (save(input.text.toString())) { dialog.dismiss(); renderAlbums() }
+            else input.error = "Choose a unique playlist name"
+        }
     }
 
     private fun renderAlbums() {
         albumsPanel.removeAllViews()
+        thumbnailViews.clear()
+        val album = openedPlaylist?.let { name -> playlistStore.all().firstOrNull { it.name == name } }
+        if (album != null) { renderPlaylist(album); return }
+        openedPlaylist = null
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(text("Your playlists", 22f, ink, true), LinearLayout.LayoutParams(0, dp(60), 1f))
+        heading.addView(quietButton("+ New") {
+            playlistNameDialog("New playlist") { name -> playlistStore.create(name).also { if (it) openedPlaylist = name.trim().take(80) } }
+        }.apply { contentDescription = "New playlist" })
+        albumsPanel.addView(heading)
         albumsPanel.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; background = ripple(12); contentDescription = "Spotify playlists"
-            setPadding(dp(4), dp(16), dp(4), dp(16))
+            setPadding(dp(4), dp(8), dp(4), dp(16))
             setOnClickListener { startActivity(Intent(this@MainActivity, SpotifyImportActivity::class.java)) }
             addView(ImageView(this@MainActivity).apply { setImageResource(R.drawable.spotify_logo); scaleType = ImageView.ScaleType.FIT_START },
-                LinearLayout.LayoutParams(dp(110), dp(30)).apply { marginEnd = dp(18) })
-            addView(text("Playlists  ›", 15f, muted))
+                LinearLayout.LayoutParams(dp(90), dp(26)).apply { marginEnd = dp(12) })
+            addView(text("Import & matching  ›", 13f, muted))
         })
-        val albums = playlistStore.all().filter { it.videos.isNotEmpty() || it.spotifyId != null }
-        if (albums.isEmpty()) albumsPanel.addView(text("Save songs to an album from ⋮.", 15f, muted).apply { setPadding(dp(4), dp(28), 0, 0) })
-        albums.forEach { album ->
+        val albums = playlistStore.all().filter { it.name.substringBefore(" · Spotify [").contains(playlistQuery.trim(), ignoreCase = true) }
+        if (albums.isEmpty()) albumsPanel.addView(text("No playlists found.", 15f, muted))
+        albums.forEach { p ->
             albumsPanel.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(4), dp(18), dp(4), dp(18))
-                background = ripple(12)
-                setOnClickListener { openAlbum(album) }
-                addView(ImageView(this@MainActivity).apply {
-                    setImageResource(R.drawable.ic_saved); imageTintList = ColorStateList.valueOf(mint)
-                }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(18) })
+                setPadding(0, dp(10), 0, dp(10)); background = ripple(12)
+                setOnClickListener { openedPlaylist = p.name; hideKeyboard(); renderAlbums(); phoneScroll.scrollTo(0, 0) }
+                addView(playlistArt(p), LinearLayout.LayoutParams(dp(64), dp(64)).apply { marginEnd = dp(14) })
                 val title = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-                title.addView(text(album.name.substringBefore(" · Spotify ["), 16f, ink, true))
-                title.addView(text(album.detail ?: if (album.videos.size == 1) "1 song" else "${album.videos.size} songs", 12f, muted))
+                title.addView(text(p.name.substringBefore(" · Spotify [").trim(), 16f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+                title.addView(text(p.detail ?: if (p.videos.size == 1) "1 song" else "${p.videos.size} songs", 12f, muted).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(text("›", 24f, muted))
             })
         }
+        requestPlaylistArt(albums.flatMap { it.videos.take(1) })
     }
 
-    private fun openAlbum(album: KaraokePlaylist) {
-        if (album.videos.isEmpty() && album.spotifyId != null) {
-            startActivity(Intent(this, SpotifyImportActivity::class.java)); return
-        }
-        showDialog(AlertDialog.Builder(this).setTitle(album.name.substringBefore(" · Spotify ["))
-            .setItems(album.videos.map { it.title }.toTypedArray()) { _, index ->
-                val video = album.videos[index]
-                showDialog(AlertDialog.Builder(this).setTitle(displayTitle(video.title))
-                    .setItems(arrayOf("Play now", "Play next", "Queue", if (album.spotifyId == null) "Remove from album" else "Add to album")) { _, action ->
-                        when (action) {
-                            0 -> playNow(video)
-                            1 -> { if (CarPlaybackLink.playNext?.invoke(video) != true) queueStore.playNext(video, null); refreshPhoneQueue() }
-                            2 -> { queueStore.add(video); refreshPhoneQueue() }
-                            3 -> { if (album.spotifyId != null) chooseAlbum(video)
-                                else { if (playlistStore.contains(album.name, video.id)) playlistStore.toggle(album.name, video); renderAlbums() } }
-                        }
-                    }.setNegativeButton("Cancel", null))
-            }.setNegativeButton("Close", null))
+    private fun playlistArt(p: KaraokePlaylist) = ImageView(this).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP; background = panel(Color.rgb(29, 40, 45), 10); clipToOutline = true
+        val video = p.videos.firstOrNull()
+        if (video == null) { setImageResource(R.drawable.ic_saved); setPadding(dp(18), dp(18), dp(18), dp(18)); imageTintList = ColorStateList.valueOf(mint) }
+        else { setImageBitmap(Thumbnails.get(video.id)); thumbnailViews.getOrPut(video.id) { mutableListOf() }.add(this) }
+    }
+
+    private fun requestPlaylistArt(videos: List<KaraokeVideo>) {
+        Thumbnails.request(videos) { if (!isDestroyed && page == Page.ALBUMS)
+            thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let { bitmap -> view.forEach { it.setImageBitmap(bitmap) } } } }
+    }
+
+    private fun renderPlaylist(album: KaraokePlaylist) {
+        albumsPanel.addView(quietButton("‹  Your playlists") { openedPlaylist = null; renderAlbums(); phoneScroll.scrollTo(0, 0) })
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(16)) }
+        heading.addView(playlistArt(album), LinearLayout.LayoutParams(dp(88), dp(88)).apply { marginEnd = dp(16) })
+        val title = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        title.addView(text(album.name.substringBefore(" · Spotify [").trim(), 23f, ink, true))
+        title.addView(text(album.detail ?: if (album.videos.size == 1) "1 song" else "${album.videos.size} songs", 13f, muted))
+        heading.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        heading.addView(iconButton(R.drawable.ic_more, "Playlist options") { anchor ->
+            PopupMenu(this, anchor).apply {
+                if (album.spotifyId == null) {
+                    menu.add("Rename").setOnMenuItemClickListener {
+                        playlistNameDialog("Rename playlist", album.name) { name -> playlistStore.rename(album.name, name).also { if (it) openedPlaylist = name.trim().take(80) } }; true
+                    }
+                    menu.add("Delete playlist").setOnMenuItemClickListener {
+                        showDialog(AlertDialog.Builder(this@MainActivity).setTitle("Delete this playlist?").setMessage(album.name)
+                            .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ -> playlistStore.delete(album.name); openedPlaylist = null; renderAlbums() }); true
+                    }
+                } else {
+                    menu.add("Make editable copy").setOnMenuItemClickListener {
+                        playlistNameDialog("Copy karaoke playlist", album.name.substringBefore(" · Spotify [").trim() + " mix") { name ->
+                            playlistStore.create(name, album.videos).also { if (it) openedPlaylist = name.trim().take(80) }
+                        }; true
+                    }
+                    menu.add("Find more matches").setOnMenuItemClickListener { startActivity(Intent(this@MainActivity, SpotifyImportActivity::class.java)); true }
+                }
+                show()
+            }
+        })
+        albumsPanel.addView(heading)
+        if (album.spotifyId == null) albumsPanel.addView(quietButton("+ Add songs") {
+            showPage(Page.SEARCH); searchInput.requestFocus()
+            WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.ime())
+            Toast.makeText(this, "Choose ⋮ → Add to playlist on any song", Toast.LENGTH_LONG).show()
+        })
+        if (album.videos.isEmpty()) albumsPanel.addView(text(if (album.spotifyId == null) "Add your first song." else "Still finding karaoke versions. Open Import & matching to continue.", 15f, muted))
+        album.videos.forEach { albumsPanel.addView(songRow(it, album = album)) }
+        requestPlaylistArt(album.videos)
     }
 
     private fun updatePhoneQueueStatus() {

@@ -1,0 +1,1 @@
+Polished playlists with artwork, name search and editing. Improved karaoke matching and a second targeted search find more versions; old misses are checked again. Faster large-library matching now shows progress, and shared cover artwork updates correctly. Car playlists use short numbered pages.

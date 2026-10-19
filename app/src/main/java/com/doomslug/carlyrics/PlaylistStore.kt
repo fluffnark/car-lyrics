@@ -21,8 +21,40 @@ class PlaylistStore(context: Context) {
             val item = root.optJSONObject(index) ?: return@mapNotNull null
             KaraokePlaylist(item.optString("name"), readVideos(item.optJSONArray("videos") ?: JSONArray()))
         }.filter { it.name.isNotBlank() }
-        return starterNames.map { name -> stored.firstOrNull { it.name == name } ?: KaraokePlaylist(name, emptyList()) }
-            .plus(stored.filter { it.name !in starterNames })
+        return if (root.length() == 0 && !prefs.contains("lists"))
+            starterNames.map { KaraokePlaylist(it, emptyList()) } else stored
+    }
+
+    fun create(name: String, videos: List<KaraokeVideo> = emptyList()): Boolean {
+        val clean = name.trim().take(80)
+        if (clean.isBlank() || all().any { it.name.equals(clean, true) }) return false
+        write(local() + KaraokePlaylist(clean, videos.filter { KaraokeVideo.ID.matches(it.id) && it.title.isNotBlank() }.distinctBy { it.id }))
+        return true
+    }
+
+    fun rename(name: String, replacement: String): Boolean {
+        val clean = replacement.trim().take(80)
+        val lists = local()
+        if (clean.isBlank() || lists.none { it.name == name } || all().any { it.name != name && it.name.equals(clean, true) }) return false
+        write(lists.map { if (it.name == name) it.copy(name = clean) else it })
+        return true
+    }
+
+    fun delete(name: String) { write(local().filterNot { it.name == name }) }
+
+    fun remove(name: String, id: String) {
+        write(local().map { if (it.name == name) it.copy(videos = it.videos.filterNot { v -> v.id == id }) else it })
+    }
+
+    fun move(name: String, id: String, delta: Int) {
+        write(local().map { p ->
+            if (p.name != name) p else {
+                val items = p.videos.toMutableList()
+                val index = items.indexOfFirst { it.id == id }
+                if (index >= 0) items.add((index + delta).coerceIn(items.indices), items.removeAt(index))
+                p.copy(videos = items)
+            }
+        })
     }
 
     fun contains(name: String, id: String): Boolean = all().firstOrNull { it.name == name }?.videos?.any { it.id == id } == true

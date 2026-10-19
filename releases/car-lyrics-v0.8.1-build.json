@@ -1,0 +1,27 @@
+{
+  "package": "com.doomslug.carlyrics",
+  "versionName": "0.8.1",
+  "versionCode": 25,
+  "aab": "car-lyrics-v0.8.1.aab",
+  "sha256": "fd29c3f70e846de47e9b670ca11a4183f963c366e354f9867520dabcf38140c9",
+  "uploadCertificateSha256": "9aad5abe44127308ccca0f1670e31ece186f006f50e36cf99851f9f4b0e0e3f1",
+  "automatedTests": 53,
+  "failures": 0,
+  "checks": [
+    "testDebugUnitTest",
+    "lintDebug",
+    "lintRelease",
+    "APK signature",
+    "AAB signature"
+  ],
+  "builtAt": "2026-10-19T14:20:23.802966+00:00",
+  "playStatus": "Published to Internal testing October 19, 2026 08:25 America/Denver",
+  "headUnit": "Mazda-profile rotary DHU: page 2/7 opens at first row after More 20 of 123",
+  "playValidation": {
+    "errors": 0,
+    "warnings": [
+      "No deobfuscation file; shrinking disabled"
+    ],
+    "lostDeviceSupport": 0
+  }
+}

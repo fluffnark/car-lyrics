@@ -1,0 +1,1 @@
+A cleaner Playlists tab with artwork, name search, new playlists and editing. Copy Spotify karaoke playlists into editable mixes. Better matching handles provider annotations, collaborators and remasters, tries an extra search, and rechecks old misses. Clear progress shows songs still to check and searches needing retry. Car lists use shorter pages with page numbers.
