@@ -1,6 +1,6 @@
 # Car Lyrics Privacy Policy
 
-**Effective date: October 4, 2026**
+**Effective date: October 18, 2026**
 
 Car Lyrics is a private Android Auto prototype developed by Caleb Cheng ("we", "us", or "our"). This policy explains what the app does with information when you use it.
 
@@ -20,6 +20,12 @@ Car Lyrics connects to the internet to load public karaoke video listings and to
 - [YouTube Terms of Service](https://www.youtube.com/t/terms)
 
 Car Lyrics does not receive or store your YouTube password, Google password, or YouTube account credentials.
+
+## Optional Spotify playlist import
+
+When you connect Spotify, Car Lyrics requests read-only access to your private and collaborative playlists. Browser sign-in uses PKCE; the app never receives your Spotify password or a client secret. Access and refresh tokens are encrypted with a key held in Android Keystore. Imported playlist names, track titles, artists, matching results, and selected karaoke video IDs stay in the app's private storage. CSV imports read only the file you select.
+
+To find karaoke versions, the app sends song titles and artist names to YouTube search. Spotify playlist access is governed by [Spotify's Privacy Policy](https://www.spotify.com/legal/privacy-policy/). Car Lyrics does not change your Spotify playlists or download Spotify audio. Disconnect removes the saved connection tokens; imported karaoke playlists remain available on the device until app storage is cleared or the app is uninstalled. You can also revoke access in your Spotify account.
 
 ## Voice and text search
 

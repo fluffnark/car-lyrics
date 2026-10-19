@@ -61,6 +61,11 @@ public final class NativeMorpheService extends INativeMorphe.Stub {
             // End this display's Activity when repairing/disconnecting, rather
             // than relocating its old task onto the passenger's phone display.
             int destroyContent = DisplayManager.class.getField("VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL").getInt(null);
+            // Keep only this private video display usable when the phone locks.
+            // The default display and its keyguard remain untouched. Android
+            // requires a separate display group for an always-unlocked display.
+            int ownGroup = DisplayManager.class.getField("VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP").getInt(null);
+            int unlocked = DisplayManager.class.getField("VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED").getInt(null);
             surface = input;
             lifetime = client;
             lifetime.linkToDeath(death, 0);
@@ -69,7 +74,7 @@ public final class NativeMorpheService extends INativeMorphe.Stub {
                 // 160 dpi advertised a 1280x720 dp tablet, allowing its compact
                 // watch layout instead of the phone's landscape fullscreen player.
                 "Car Lyrics native Morphe", 1280, 720, 320, surface,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | trusted | ownFocus | keepFocus | destroyContent, null, handler);
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | trusted | ownFocus | keepFocus | destroyContent | ownGroup | unlocked, null, handler);
             if (display == null) throw new IllegalStateException("Display creation failed");
             return display.getDisplay().getDisplayId();
         });
@@ -85,7 +90,13 @@ public final class NativeMorpheService extends INativeMorphe.Stub {
                 "app.morphe.android.youtube/com.google.android.apps.youtube.app.application.Shell_UrlActivity",
                 "-f", "0x10000000", "-d", url).redirectErrorStream(true).start();
             if (!command.waitFor(5, TimeUnit.SECONDS)) { command.destroy(); throw new IllegalStateException("Morphe launch timed out"); }
-            String output = new String(command.getInputStream().readAllBytes());
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            try (java.io.InputStream stream = command.getInputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
+            }
+            String output = bytes.toString("UTF-8");
             if (command.exitValue() != 0 || output.contains("Error:")) throw new IllegalStateException(output);
             return null;
         });

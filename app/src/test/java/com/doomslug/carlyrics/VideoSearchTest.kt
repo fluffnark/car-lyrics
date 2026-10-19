@@ -93,6 +93,26 @@ class VideoSearchTest {
         search.close()
     }
 
+    @Test fun libraryOnlyAvoidsNetworkAndChangingOptionsRejectsEarlierWebResults() {
+        var calls = 0
+        var reply: ((VideoSearchResult) -> Unit)? = null
+        var requested = ""
+        val search = VideoSearchSession({ listOf(queen) }, VideoSearch { q, callback ->
+            calls++; requested = q; reply = callback
+        }, Executor { it.run() }) {}
+        search.update("Queen", submitted = true, options = VideoSearchOptions(karaokeOnly = true, provider = "KaraFun"))
+        assertEquals("Queen karaoke KaraFun", requested)
+        assertEquals(1, calls)
+        val old = reply!!
+        search.update("Queen", submitted = true, options = VideoSearchOptions(libraryOnly = true))
+        assertEquals(listOf(queen), search.videos)
+        assertFalse(search.loading)
+        old(VideoSearchResult(listOf(remoteSong)))
+        assertEquals(listOf(queen), search.videos)
+        assertEquals(1, calls)
+        search.close()
+    }
+
     @Test fun parserKeepsTitlesBoundToTheirOwnVideoAndDeduplicates() {
         val html = """<script>var ytInitialData = {"contents":{"items":[
           {"videoRenderer":{"videoId":"abcdefghijk","title":{"runs":[{"text":"Queen "},{"text":"& friends"}]}}},

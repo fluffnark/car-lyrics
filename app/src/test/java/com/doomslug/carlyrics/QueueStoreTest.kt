@@ -25,4 +25,34 @@ class QueueStoreTest {
         assertTrue(store.add(b))
         assertFalse(store.add(KaraokeVideo("bad", "Invalid")))
     }
+    @Test fun playNextAdoptsCurrentSongAndMovesExistingSongWithoutDuplicates() {
+        val app = RuntimeEnvironment.getApplication()
+        app.getSharedPreferences("karaoke_queue", 0).edit().clear().commit()
+        val store = QueueStore(app)
+        val current = KaraokeVideo("abcdefghijk", "Current from search")
+        val next = KaraokeVideo("12345678901", "Next")
+        val later = KaraokeVideo("99999999999", "Later")
+        store.add(later); store.add(next)
+        store.playNext(next, current)
+        assertEquals(listOf(current, next, later), QueueStore(app).all())
+        store.playNext(next, current)
+        assertEquals(listOf(current, next, later), store.all())
+        store.playNext(current, current)
+        assertEquals(listOf(current, next, later), store.all())
+        store.playNext(later, null)
+        assertEquals(listOf(later, current, next), store.all())
+    }
+
+    @Test fun namedAlbumsArePersistentAndRepeatedAddsNeverRemoveSongs() {
+        val app = RuntimeEnvironment.getApplication()
+        app.getSharedPreferences("karaoke_playlists", 0).edit().clear().commit()
+        val store = PlaylistStore(app)
+        val video = KaraokeVideo("abcdefghijk", "Song")
+        assertTrue(store.add("  Road trip  ", video))
+        assertFalse(store.add("Road trip", video))
+        assertFalse(store.add(" ", video))
+        assertFalse(store.add("Broken", KaraokeVideo("bad", "Invalid")))
+        assertEquals(listOf(video), PlaylistStore(app).all().first { it.name == "Road trip" }.videos)
+        assertEquals(4, store.all().size)
+    }
 }

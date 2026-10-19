@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""USB diagnosis, recovery and reload for Car Lyrics. Uses only Python's stdlib."""
+import argparse
+import os
+import re
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+PACKAGE = 'com.doomslug.carlyrics'
+
+
+def run(args, *, capture=False, check=True, env=None, timeout=60):
+    return subprocess.run([str(a) for a in args], text=True, capture_output=capture,
+                          check=check, env=env, cwd=ROOT, timeout=timeout)
+
+
+def sdk_path():
+    for path in [os.getenv('ANDROID_HOME'), os.getenv('ANDROID_SDK_ROOT'),
+                 Path.home() / '.local/share/mise/installs/android-sdk/23.0',
+                 Path.home() / 'Android/Sdk']:
+        if path and (Path(path) / 'platform-tools/adb').is_file():
+            return Path(path)
+    return None
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['doctor', 'repair', 'reload', 'logs'])
+    parser.add_argument('--serial', default=os.getenv('ANDROID_SERIAL'))
+    parser.add_argument('--package', choices=[PACKAGE, PACKAGE + '.dev'], default=None)
+    args = parser.parse_args()
+    args.package = args.package or (PACKAGE + '.dev' if args.action == 'reload' else PACKAGE)
+    if args.action == 'reload' and args.package != PACKAGE + '.dev':
+        parser.error('USB reload targets the separate .dev copy. Update the Play copy through Play with the release AAB.')
+    sdk = sdk_path()
+    adb = str(sdk / 'platform-tools/adb') if sdk else shutil.which('adb')
+    if not adb:
+        parser.error('Android platform-tools missing. Set ANDROID_HOME to your SDK directory.')
+    result = run([adb, 'devices'], capture=True)
+    devices = [line.split() for line in result.stdout.splitlines()[1:] if line.strip()]
+    if not args.serial:
+        if len(devices) != 1 or devices[0][1] != 'device':
+            parser.error('Connect and unlock one phone, accept USB debugging, or choose --serial.\n' + result.stdout)
+        args.serial = devices[0][0]
+    if [args.serial, 'device'] not in [d[:2] for d in devices]:
+        parser.error('Selected phone is offline or unauthorized. Unlock it and accept USB debugging.')
+    target = [adb, '-s', args.serial]
+
+    def shell(command, check=True):
+        return run(target + ['shell', command], capture=True, check=check)
+
+    def running():
+        return bool(shell('pidof shizuku_server', check=False).stdout.strip())
+
+    def doctor():
+        print('Phone:', args.serial)
+        print('Shizuku server:', 'RUNNING' if running() else 'STOPPED — run tools/caraoke repair')
+        for package in ['moe.shizuku.privileged.api', 'app.morphe.android.youtube', args.package]:
+            result = shell('dumpsys package ' + package)
+            versions = [line.strip() for line in result.stdout.splitlines() if 'versionName=' in line]
+            print(package + ':', versions[0] if versions else 'MISSING')
+        listeners = shell('settings get secure enabled_notification_listeners').stdout
+        print('Morphe controls:', 'ENABLED' if args.package + '/com.doomslug.carlyrics.MorpheMediaAccess' in listeners
+              else 'NEEDS SETUP — enable Morphe controls in the phone app')
+        print('Wireless debugging:', shell('settings get global adb_wifi_enabled').stdout.strip())
+        print('Shizuku authorization and native-mode readiness: tap Setup/Ready at the top right of this app copy.')
+        print('After reboot, use Wireless debugging → Start in Shizuku, or run this repair command over USB.')
+
+    if args.action == 'doctor':
+        doctor()
+    elif args.action in ('repair', 'reload'):
+        if not running():
+            # Resolve every time: Android changes this directory after an app update.
+            command = '''for apk in $(pm path moe.shizuku.privileged.api | sed 's/^package://'); do
+                for starter in "${apk%/*}"/lib/*/libshizuku.so; do
+                    if [ -x "$starter" ]; then "$starter"; exit $?; fi
+                done
+            done
+            for starter in /sdcard/Android/data/moe.shizuku.privileged.api/start.sh; do
+                if [ -f "$starter" ]; then sh "$starter"; exit $?; fi
+            done
+            echo 'Shizuku starter missing. Install/open Shizuku and use View command.' >&2
+            exit 1'''
+            result = shell(command, check=False)
+            print(result.stdout, end='')
+            if result.returncode:
+                sys.exit(result.stderr or 'Could not start Shizuku.')
+            for _ in range(20):
+                if running():
+                    break
+                time.sleep(.25)
+            if not running():
+                sys.exit('Shizuku did not start. Open Shizuku on the phone for its diagnostic message.')
+        if args.action == 'reload':
+            if args.package != PACKAGE + '.dev':
+                parser.error('USB reload targets the separate .dev copy. Update the Play copy through Play with the release AAB.')
+            env = dict(os.environ)
+            if sdk:
+                env['ANDROID_HOME'] = str(sdk)
+            java = Path.home() / '.local/share/mise/installs/java/17.0.2'
+            if java.is_dir():
+                env['JAVA_HOME'] = str(java)
+            run([ROOT / 'gradlew', '--max-workers=2', ':app:assemblePoiProbe'], env=env, timeout=600)
+            # -r preserves queue, playlists and settings. Never uninstall to resolve signing errors.
+            run(target + ['install', '-r', ROOT / 'app/build/outputs/apk/poiProbe/app-poiProbe.apk'])
+        version = re.search(r'versionCode=(\d+)', shell('dumpsys package ' + args.package).stdout)
+        if args.action == 'repair' and version and int(version.group(1)) < 19:
+            print('Refreshing the older app process to receive Shizuku; app data is preserved.', flush=True)
+            run(target + ['shell', 'am', 'force-stop', args.package])
+        run(target + ['shell', 'am', 'start', '-n', args.package + '/com.doomslug.carlyrics.MainActivity'])
+        doctor()
+    else:
+        run(target + ['logcat', '-v', 'brief', 'CarLyricsNative:I', 'CarLyricsMorphe:I',
+                      'CarLyricsSearch:I', 'AndroidRuntime:E', '*:S'], timeout=None)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except subprocess.CalledProcessError as error:
+        print('Command failed:', ' '.join(str(a) for a in error.cmd), file=sys.stderr)
+        if error.stderr:
+            print(error.stderr, file=sys.stderr)
+        sys.exit(error.returncode)
+    except subprocess.TimeoutExpired:
+        print('Device command timed out. Check the USB connection and unlock the phone, then retry.', file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)

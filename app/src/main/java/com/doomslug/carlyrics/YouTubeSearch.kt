@@ -25,8 +25,11 @@ object YouTubeSearch : VideoSearch {
     override fun search(query: String, done: (VideoSearchResult) -> Unit) {
         val clean = query.trim().take(200)
         if (clean.isBlank()) { done(VideoSearchResult(emptyList())); return }
-        worker.execute {
-            val result = runCatching {
+        worker.execute { val result = fetch(clean); main.post { done(result) } }
+    }
+
+    /** Blocking worker-only search, also used by the resumable playlist importer. */
+    internal fun fetch(clean: String): VideoSearchResult = runCatching {
                 val encoded = URLEncoder.encode(clean, "UTF-8")
                 val connection = (URL("https://www.youtube.com/results?search_query=$encoded").openConnection() as HttpURLConnection).apply {
                     connectTimeout = 8_000
@@ -54,9 +57,6 @@ object YouTubeSearch : VideoSearch {
             }.getOrElse {
                 VideoSearchResult(emptyList(), "YouTube search unavailable. Check your connection and retry.")
             }
-            main.post { done(result) }
-        }
-    }
 }
 
 internal object YouTubeSearchParser {

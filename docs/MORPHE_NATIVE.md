@@ -21,7 +21,9 @@ flowchart LR
 
 ### Pixel setup
 
-Official Shizuku **13.6.0** is installed and paired with Android wireless debugging. Its server runs as shell UID 2000. **Car Lyrics Native Dev** is authorized, has Morphe media-session access, and has native mode enabled. Start-on-boot and the required secure-settings permission were configured earlier; the next actual reboot has not verified automatic startup. If the server is stopped, open Shizuku and use **Start** under wireless debugging.
+October 18 correction: official Shizuku **13.6.0** is installed, and its server can run as shell UID 2000. The earlier secure-settings grant and enabled boot setting did **not** provide automatic startup: the installed setting explicitly says **Start on boot (root)**, and this unrooted Pixel was found without its server after reboot. Use **Start** under wireless debugging, or `./tools/caraoke repair` over USB. This command resolves the current installed native starter; the old `/sdcard/Android/data/.../start.sh` path was absent on this device.
+
+V19 adds stopped-server/authorization status, binder death cleanup, stale initialization guards, and a bounded connection request to the installed manager when its startup binder delivery is missed. The manager callback is accepted only from the manager UID, then the normal per-package Shizuku permission still applies. This compatibility fallback uses Shizuku 13.6.0's [ShellBinderRequestHandler](https://github.com/RikkaApps/Shizuku/blob/v13.6.0/manager/src/main/java/moe/shizuku/manager/shell/ShellBinderRequestHandler.kt); it must be rechecked against future Shizuku releases. [Release v19](RELEASE_V19.md) records device tests.
 
 Open **Car Lyrics Native Dev** in the desktop Android Auto launcher. For the physical Mazda, install the standard v16 release through Play and separately enable native mode/authorize **Car Lyrics**; Native Dev’s ADB installation and permissions do not transfer. See [real-vehicle installation](../README.md#install-for-the-physical-mazda). This separate package (`com.doomslug.carlyrics.dev`) preserves the Play-installed v14 and its data. Native Dev uses the navigation template as a private host experiment; karaoke is not a navigation app and this variant is not for Play submission. The standard release remains the existing POI prototype, with a different host layout.
 
@@ -41,7 +43,8 @@ Morphe’s existing **Settings → Player → Open videos in fullscreen mode →
 | Host restrictions | Browse, Queue, Seek, Back, Now playing tested with DHU `restrict all`; no block in those paths |
 | Split dashboard | Host’s unoccluded visible rectangle controls aspect fit; video clears the right-hand media card |
 | Focus ownership | Own-focus and no-steal-focus flags prevent Morphe from taking the phone/AA focus |
-| Physical Mazda, locked phone, reboot, measured A/V sync | Still to verify |
+| Locked/screen-off phone | V20 verified advancing native video with primary display dozing and keyguard active; private video display has its own always-unlocked group |
+| Physical Mazda, reboot auto-start, measured A/V sync | Still to verify |
 
 [Player proof](images/native-v16-player.png) · [Knob seek proof](images/native-v16-seek.png) · [Queue proof](images/native-v16-queue.png)
 
@@ -58,7 +61,7 @@ The trusted/own-focus/no-steal/destroy-on-removal flags come from [AOSP DisplayM
 ### Remaining gates
 
 1. Repeat reconnect, aspect fit and Commander navigation on the actual Mazda; confirm screen geometry/density. Expanded app view is host-controlled, and split view remains supported.
-2. Verify Shizuku restart after reboot, lock/screen-off behavior, service death and permission loss. Hidden privileged APIs make future Android versions an explicit compatibility gate.
+2. Verify Shizuku start after a full reboot and permission loss. V20 device tests cover live server/helper death and locked/screen-off video; repeat these checks after Android/Shizuku updates. Hidden privileged APIs make future Android versions an explicit compatibility gate.
 3. Measure audio/video offset with a known sync reference. Morphe supplies the original audio and video; native rendering adds its own frame path.
 4. Automatic queue advancement and ownership of Morphe’s autoplay remain unfinished. Manual Next/Previous follow the list selected in Car Lyrics and read fresh queue/playlist contents.
 5. Repeat car voice recognition against native playback with a real cabin microphone. V14 DHU voice recognition and the shared submitted-query → result → player code are verified; the phone microphone and cabin acoustics are not.

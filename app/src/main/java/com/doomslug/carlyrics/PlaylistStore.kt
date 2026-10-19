@@ -4,14 +4,18 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class KaraokePlaylist(val name: String, val videos: List<KaraokeVideo>)
+data class KaraokePlaylist(val name: String, val videos: List<KaraokeVideo>,
+                           val spotifyId: String? = null, val detail: String? = null)
 
 /** Small local playlist store. The fixed starter lists keep creation knob-friendly in the car. */
 class PlaylistStore(context: Context) {
     private val prefs = context.getSharedPreferences("karaoke_playlists", Context.MODE_PRIVATE)
     private val starterNames = listOf("My karaoke mix", "Warm-up set", "Duets night")
 
-    fun all(): List<KaraokePlaylist> {
+    fun all(): List<KaraokePlaylist> = local() + SpotifyImportStore(context).albums()
+
+    private val context = context.applicationContext
+    private fun local(): List<KaraokePlaylist> {
         val root = runCatching { JSONArray(prefs.getString("lists", "[]")) }.getOrDefault(JSONArray())
         val stored = (0 until root.length()).mapNotNull { index ->
             val item = root.optJSONObject(index) ?: return@mapNotNull null
@@ -23,8 +27,21 @@ class PlaylistStore(context: Context) {
 
     fun contains(name: String, id: String): Boolean = all().firstOrNull { it.name == name }?.videos?.any { it.id == id } == true
 
+    /** Add is idempotent; choosing an album twice must not remove its song. */
+    fun add(name: String, video: KaraokeVideo): Boolean {
+        val clean = name.trim().take(80)
+        if (clean.isBlank() || !KaraokeVideo.ID.matches(video.id) || video.title.isBlank()) return false
+        if (contains(clean, video.id)) return false
+        val lists = local().toMutableList()
+        val index = lists.indexOfFirst { it.name == clean }
+        if (index < 0) lists.add(KaraokePlaylist(clean, listOf(video)))
+        else lists[index] = lists[index].copy(videos = lists[index].videos + video)
+        write(lists)
+        return true
+    }
+
     fun toggle(name: String, video: KaraokeVideo): Boolean {
-        val lists = all().toMutableList()
+        val lists = local().toMutableList()
         val index = lists.indexOfFirst { it.name == name }
         val current = lists.getOrNull(index)?.videos?.toMutableList() ?: mutableListOf()
         val existing = current.indexOfFirst { it.id == video.id }
@@ -73,6 +90,17 @@ class QueueStore(context: Context) {
         if (items.any { it.id == video.id }) return false
         write(items + video)
         return true
+    }
+
+    /** Move an existing song or insert a new song immediately after the current one. */
+    fun playNext(video: KaraokeVideo, current: KaraokeVideo?) {
+        if (!KaraokeVideo.ID.matches(video.id) || video.title.isBlank() || video.id == current?.id) return
+        val items = all().filterNot { it.id == video.id }.toMutableList()
+        // Adopt the currently playing song when playback came from search or an album.
+        if (current != null && items.none { it.id == current.id }) items.add(0, current)
+        val index = items.indexOfFirst { it.id == current?.id }
+        items.add(if (index < 0) 0 else index + 1, video)
+        write(items)
     }
 
     fun remove(id: String) { write(all().filterNot { it.id == id }) }

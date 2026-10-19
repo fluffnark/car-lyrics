@@ -1,0 +1,1 @@
+Spotify playlist imports with karaoke matches, saved progress, refresh and manual corrections. Public previews and restricted lists are labelled. CSV imports support full playlist exports. All saved albums and songs can be paged in the car. Your Spotify playlists stay unchanged.

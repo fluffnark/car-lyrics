@@ -11,19 +11,22 @@ import java.util.concurrent.Executors
 
 /** Fetches only the small thumbnails shown on the current car page. */
 object Thumbnails {
-    private val worker = Executors.newSingleThreadExecutor()
+    private val worker = Executors.newFixedThreadPool(3)
     private val main = Handler(Looper.getMainLooper())
     private val cache = object : LruCache<String, Bitmap>(3 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     private val unavailable = mutableSetOf<String>()
-    private val pending = mutableSetOf<String>()
+    private val pending = mutableMapOf<String, MutableSet<() -> Unit>>()
 
     fun get(id: String): Bitmap? = cache.get(id)
 
     fun request(videos: List<KaraokeVideo>, changed: () -> Unit) {
         videos.forEach { video ->
-            if (cache.get(video.id) != null || video.id in unavailable || !pending.add(video.id)) return@forEach
+            if (cache.get(video.id) != null || video.id in unavailable) return@forEach
+            val listeners = pending[video.id]
+            if (listeners != null) { listeners.add(changed); return@forEach }
+            pending[video.id] = mutableSetOf(changed)
             worker.execute {
                 val bitmap = runCatching {
                     val connection = URL("https://i.ytimg.com/vi/${video.id}/mqdefault.jpg").openConnection() as HttpURLConnection
@@ -39,9 +42,9 @@ object Thumbnails {
                     } finally { connection.disconnect() }
                 }.getOrNull()
                 main.post {
-                    pending.remove(video.id)
+                    val listeners = pending.remove(video.id).orEmpty()
                     if (bitmap != null) cache.put(video.id, bitmap) else unavailable.add(video.id)
-                    changed()
+                    listeners.forEach { it() }
                 }
             }
         }

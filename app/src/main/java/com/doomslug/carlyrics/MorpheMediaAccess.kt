@@ -89,3 +89,15 @@ internal class MorpheRecovery(
         return true
     }
 }
+
+/** A timestamp belongs to its resolved video, never an unknown autoplay title. */
+internal data class MorpheResumePoint(val video: KaraokeVideo, val positionMs: Long, val resume: Boolean) {
+    companion object {
+        fun capture(selected: KaraokeVideo?, playing: KaraokeVideo?, timeline: VideoTimeline?, paused: Boolean): MorpheResumePoint? {
+            val video = playing ?: selected ?: return null
+            val position = if (playing != null && timeline != null && timeline.positionMs < timeline.durationMs)
+                timeline.positionMs else 0
+            return MorpheResumePoint(video, position, !paused)
+        }
+    }
+}

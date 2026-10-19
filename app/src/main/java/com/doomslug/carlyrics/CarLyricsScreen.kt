@@ -64,18 +64,23 @@ class CarLyricsScreen private constructor(
     private val queueStore = QueueStore(context)
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private var editingSearch = false
+    private var playlistPage = 0
     private val queuePreferences = context.getSharedPreferences("karaoke_queue", 0)
     private val playlistPreferences = context.getSharedPreferences("karaoke_playlists", 0)
     private val queueChanged = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "items") session.active?.libraryChanged(queueChanged = true)
     }
     private val playlistsChanged = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "lists") session.active?.libraryChanged(queueChanged = false)
+        // Hundreds of import updates must not reset the rotary selection mid-browse.
+        if (key == "lists" || (key == "spotify" && !SpotifyImporter.running)) session.active?.libraryChanged(queueChanged = false)
+    }
+    private val importFinished: () -> Unit = {
+        if (!SpotifyImporter.running) session.active?.libraryChanged(queueChanged = false)
     }
     private val refreshLibrary = Runnable { invalidate() }
     private val search = VideoSearchSession(
         localVideos = {
-            if (catalog === SingKingCatalog) SingKingCatalog.library + catalog.videos + saved.all() + queueStore.all()
+            if (catalog === SingKingCatalog) SingKingCatalog.library + catalog.videos + saved.all() + queueStore.all() + playlists.all().flatMap { it.videos }
             else catalog.videos
         },
         remote = remoteSearch,
@@ -90,12 +95,26 @@ class CarLyricsScreen private constructor(
             session.owner = this
             queuePreferences.registerOnSharedPreferenceChangeListener(queueChanged)
             playlistPreferences.registerOnSharedPreferenceChangeListener(playlistsChanged)
+            SpotifyImporter.observe(importFinished)
             CarPlaybackLink.playVideo = { video ->
                 val queued = queueStore.all()
                 val index = queued.indexOfFirst { it.id == video.id }
                 if (index >= 0) select(queued, index, QUEUE_SOURCE)
                 else select(listOf(video), 0)
                 true
+            }
+            CarPlaybackLink.currentVideo = { player.videoToSave(queue.getOrNull(selected)) ?: queue.getOrNull(selected) }
+            CarPlaybackLink.playNext = { video ->
+                val current = CarPlaybackLink.currentVideo?.invoke()
+                queueStore.playNext(video, current)
+                queue = queueStore.all()
+                selected = queue.indexOfFirst { it.id == current?.id }
+                session.listSource = QUEUE_SOURCE
+                true
+            }
+            CarPlaybackLink.repair = {
+                if (session.hasVideo) player.recoverVideo() else player.prepare()
+                session.hasVideo
             }
             CarPlaybackLink.showPlayer = {
                 if (session.hasVideo) {
@@ -140,6 +159,10 @@ class CarLyricsScreen private constructor(
         if (ownsSession) {
             queuePreferences.unregisterOnSharedPreferenceChangeListener(queueChanged)
             playlistPreferences.unregisterOnSharedPreferenceChangeListener(playlistsChanged)
+            SpotifyImporter.unobserve(importFinished)
+            CarPlaybackLink.currentVideo = null
+            CarPlaybackLink.playNext = null
+            CarPlaybackLink.repair = null
             CarPlaybackLink.showPlayer = null
             CarPlaybackLink.playVideo = null
             player.close()
@@ -178,7 +201,7 @@ class CarLyricsScreen private constructor(
         menu("Search YouTube", "Say a song or artist • all providers") { openSearch() }
         if (activeCollection == null && source == Source.RECENT) {
             menu("Queue", "${queueStore.all().size} songs • added from your phone") { open(Mode.QUEUE) }
-            menu("Playlists", "My mix, warm-up, and duets") { open(Mode.PLAYLISTS) }
+            menu("Playlists", "Your saved karaoke albums") { open(Mode.PLAYLISTS) }
             menu("Genres & albums", "Browse curated Sing King collections") { open(Mode.COLLECTIONS) }
             menu("Favorites", "Your saved karaoke videos") { open(Mode.BROWSE, source = Source.SAVED) }
         }
@@ -186,6 +209,10 @@ class CarLyricsScreen private constructor(
             menu("Previous video", "Go back in the current playing list") { step(-1); returnToPlayer() }
             menu("Seek current video", "Turn the knob to choose a time") { open(Mode.SEEK) }
             menu("Repair picture", "Reopen the current video at this position") { player.recoverVideo(); returnToPlayer() }
+            val current = player.videoToSave(queue.getOrNull(selected))
+            menu("Save current video", if (current != null && saved.contains(current.id)) "Saved • select to remove" else "Add to Favorites") {
+                toggleFavorite(queue.getOrNull(selected))
+            }
         }
         if (videos.isEmpty()) {
             rows += Row.Builder().setTitle(when {
@@ -280,23 +307,38 @@ class CarLyricsScreen private constructor(
 
     private fun playlistsTemplate(): Template {
         val list = ItemList.Builder()
-        playlists.all().take(contentLimit()).forEach { playlist ->
-            list.addItem(Row.Builder().setTitle(playlist.name).addText("${playlist.videos.size} karaoke songs")
+        val all = playlists.all()
+        val pageSize = (contentLimit() - 2).coerceAtLeast(1)
+        playlistPage = playlistPage.coerceAtMost((all.size - 1).coerceAtLeast(0) / pageSize)
+        all.drop(playlistPage * pageSize).take(pageSize).forEach { playlist ->
+            list.addItem(Row.Builder().setTitle(playlist.name.substringBefore(" · Spotify [")).addText(playlist.detail ?: "${playlist.videos.size} karaoke songs")
                 .setOnClickListener { open(Mode.PLAYLIST, playlist = playlist) }.build())
         }
+        pageRows(list, all.size, pageSize)
         return ListTemplate.Builder().setHeader(header("Your playlists").build())
             .setSingleList(list.build()).build()
     }
 
     private fun playlistTemplate(): Template {
         val playlist = playlists.all().firstOrNull { it.name == activePlaylist?.name } ?: return playlistsTemplate()
-        val list = ItemList.Builder().setNoItemsMessage("Add songs with Mix in the phone app")
-        playlist.videos.take(contentLimit()).forEach { video ->
-            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("${playlist.name} • karaoke")
+        val list = ItemList.Builder().setNoItemsMessage(playlist.detail ?: "Add songs in the phone app")
+        val pageSize = (contentLimit() - 2).coerceAtLeast(1)
+        playlistPage = playlistPage.coerceAtMost((playlist.videos.size - 1).coerceAtLeast(0) / pageSize)
+        playlist.videos.drop(playlistPage * pageSize).take(pageSize).forEach { video ->
+            list.addItem(Row.Builder().setTitle(video.title.take(72)).addText("${playlist.name.substringBefore(" · Spotify [")} • karaoke")
                 .setOnClickListener { select(playlist.videos, playlist.videos.indexOf(video), playlist.name) }.build())
         }
-        return ListTemplate.Builder().setHeader(header(playlist.name).build())
+        pageRows(list, playlist.videos.size, pageSize)
+        return ListTemplate.Builder().setHeader(header(playlist.name.substringBefore(" · Spotify [")).build())
             .setSingleList(list.build()).build()
+    }
+
+    private fun pageRows(list: ItemList.Builder, total: Int, size: Int) {
+        if (playlistPage > 0) list.addItem(Row.Builder().setTitle("Previous page")
+            .setOnClickListener { playlistPage--; invalidate() }.build())
+        if ((playlistPage + 1) * size < total) list.addItem(Row.Builder().setTitle("More songs / playlists")
+            .addText("${(playlistPage + 1) * size} of $total")
+            .setOnClickListener { playlistPage++; invalidate() }.build())
     }
 
     private fun playerTemplate(): Template {
@@ -335,7 +377,7 @@ class CarLyricsScreen private constructor(
             // Playing / Paused in the title consumes a task step on each change.
             val compactHeader = player.statusDetail == null
             player.setCompactHeader(compactHeader && !fullscreenHost)
-            val statusRow = Row.Builder().setTitle("Morphe")
+            val statusRow = Row.Builder().setTitle("Car Lyrics")
             if (!compactHeader) statusRow.addText(state)
             val compactPane = Pane.Builder().addRow(statusRow.build())
             if (player.statusDetail != null) compactPane.addAction(Action.Builder().setTitle("Phone setup")
@@ -358,19 +400,15 @@ class CarLyricsScreen private constructor(
             // Only the explicit local experiment declares NAVIGATION. Its empty
             // navigation overlay leaves video unobscured; the host owns the rail
             // and when the knob-accessible transport buttons hide/reappear.
-            val tools = ActionStrip.Builder()
-                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_seek)).setOnClickListener { open(Mode.SEEK) }.build())
-                .addAction(Action.Builder().setIcon(icon(R.drawable.ic_refresh)).setOnClickListener { player.recoverVideo() }.build())
-                .addAction(favoriteAction(current)).build()
             if (fullscreenHost) {
-                val builder = NavigationTemplate.Builder().setActionStrip(controls).setMapActionStrip(tools)
+                val builder = NavigationTemplate.Builder().setActionStrip(controls)
                 player.statusDetail?.let {
                     builder.setNavigationInfo(androidx.car.app.navigation.model.MessageInfo.Builder(it).build())
                 }
                 return builder.build()
             }
             return MapWithContentTemplate.Builder()
-                .setMapController(androidx.car.app.navigation.model.MapController.Builder().setMapActionStrip(tools).build())
+                .setMapController(androidx.car.app.navigation.model.MapController.Builder().build())
                 .setContentTemplate(PaneTemplate.Builder(compactPane.build()).build())
                 .setActionStrip(controls).build()
         }
@@ -392,20 +430,22 @@ class CarLyricsScreen private constructor(
     private fun favoriteAction(video: KaraokeVideo?): Action {
         val playing = player.videoToSave(video)
         return Action.Builder()
-        .setIcon(icon(if (playing != null && saved.contains(playing.id)) R.drawable.ic_saved else R.drawable.ic_favorite_outline))
-        .setOnClickListener {
-            val current = player.videoToSave(video)
-            if (current == null) {
-                androidx.car.app.CarToast.makeText(carContext,
-                    "Select this video in Car Lyrics to save it", androidx.car.app.CarToast.LENGTH_LONG).show()
-            } else current.let {
-                val added = saved.toggle(it)
-                androidx.car.app.CarToast.makeText(carContext,
-                    if (added) "Saved to Favorites" else "Removed from Favorites",
-                    androidx.car.app.CarToast.LENGTH_SHORT).show()
-                invalidate()
-            }
-        }.build()
+            .setIcon(icon(if (playing != null && saved.contains(playing.id)) R.drawable.ic_saved else R.drawable.ic_favorite_outline))
+            .setOnClickListener { toggleFavorite(video) }.build()
+    }
+
+    private fun toggleFavorite(video: KaraokeVideo?) {
+        val current = player.videoToSave(video)
+        if (current == null) {
+            androidx.car.app.CarToast.makeText(carContext,
+                "Select this video in Car Lyrics to save it", androidx.car.app.CarToast.LENGTH_LONG).show()
+        } else {
+            val added = saved.toggle(current)
+            androidx.car.app.CarToast.makeText(carContext,
+                if (added) "Saved to Favorites" else "Removed from Favorites",
+                androidx.car.app.CarToast.LENGTH_SHORT).show()
+            invalidate()
+        }
     }
 
     private fun icon(resource: Int) = CarIcon.Builder(IconCompat.createWithResource(carContext, resource)).build()

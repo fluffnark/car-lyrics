@@ -1,0 +1,18 @@
+{
+  "package": "com.doomslug.carlyrics",
+  "versionName": "0.7.0",
+  "versionCode": 22,
+  "aab": "car-lyrics-v0.7.0.aab",
+  "sha256": "3f574aa1f7f7a1ae457e146879c83d530832cd95331fabde688b582b245fb90f",
+  "uploadCertificateSha256": "9aad5abe44127308ccca0f1670e31ece186f006f50e36cf99851f9f4b0e0e3f1",
+  "automatedTests": 51,
+  "failures": 0,
+  "checks": [
+    "testDebugUnitTest",
+    "lintDebug",
+    "lintRelease",
+    "APK signature",
+    "AAB signature"
+  ],
+  "builtAt": "2026-10-19T04:08:32.766216+00:00"
+}

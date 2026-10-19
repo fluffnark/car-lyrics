@@ -29,6 +29,7 @@ class CarLyricsScreenTest {
 
     @Before fun setup() {
         listOf("saved_videos", "karaoke_playlists", "karaoke_queue").forEach { app.getSharedPreferences(it, 0).edit().clear().commit() }
+        java.io.File(app.filesDir, "spotify_playlists").deleteRecursively()
         context = TestCarContext.createCarContext(app)
         manager = context.getCarService(ScreenManager::class.java)
         context.lifecycleOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
@@ -93,21 +94,39 @@ class CarLyricsScreenTest {
         assertEquals("Sing King • Recent", list().header!!.title.toString())
     }
 
+    @Test fun allImportedPlaylistsAndSongsAreReachablePastHostLimit() {
+        val songs = (1..220).map { KaraokeVideo("%011d".format(it), "Imported song $it (Karaoke)") }
+        val imports = SpotifyImportStore(app)
+        (1..120).forEach { n -> imports.put(SpotifyPlaylist("%022d".format(n), "Imported %03d".format(n), songs.size,
+            (if (n == 120) songs else emptyList()).map { SpotifyMatch(SpotifySong(it.id, it.title, listOf("Artist")), it, "matched") })) }
+        start(); click("Playlists")
+        assertTrue(list().singleList!!.items.size <= 100)
+        click("More songs / playlists")
+        click("Imported 120")
+        assertTrue(list().singleList!!.items.size <= 100)
+        click("More songs / playlists"); click("More songs / playlists")
+        click("Imported song 220")
+        assertEquals(songs.last(), player.selections.last())
+        assertEquals(1, player.selections.size)
+    }
+
     @Test fun seekUsesKnobSelectionAndReturnDoesNotReloadVideo() {
         start(true)
         click("Song 1")
         val playing = manager.top
-        val full = playing.onGetTemplate() as NavigationTemplate
-        full.mapActionStrip!!.actions[0].onClickDelegate!!.sendClick(done)
+        assertNull((playing.onGetTemplate() as NavigationTemplate).mapActionStrip)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Seek current video")
         val timeline = list().singleList!!
         assertTrue(timeline.items.size > 4)
         timeline.onSelectedDelegate!!.sendSelected(4, done)
         // A full-size list can offer 10-second positions.
         assertEquals(40_000L, player.sought)
         returnToVideo()
-        assertSame(playing, manager.top)
+        assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
         assertEquals(1, player.selections.size)
-        (manager.top.onGetTemplate() as NavigationTemplate).mapActionStrip!!.actions[1].onClickDelegate!!.sendClick(done)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Repair picture")
         assertEquals(1, player.repairs)
     }
 
@@ -174,6 +193,19 @@ class CarLyricsScreenTest {
         assertTrue(manager.screenStack.size <= 3)
     }
 
+    @Test fun phonePlayNextAdoptsSearchPlaybackWithoutRestartingAndNextUsesItsOrder() {
+        start()
+        click("Song 1")
+        assertTrue(CarPlaybackLink.playNext!!.invoke(videos[2]))
+        assertEquals(listOf(videos[0]), player.selections)
+        assertEquals(listOf(videos[0], videos[2]), QueueStore(app).all())
+        controls().actions[2].onClickDelegate!!.sendClick(done)
+        assertEquals(videos[2], player.selections.last())
+        assertTrue(CarPlaybackLink.playNext!!.invoke(videos[1]))
+        controls().actions[2].onClickDelegate!!.sendClick(done)
+        assertEquals(videos[1], player.selections.last())
+    }
+
     @Test fun bufferingDoesNotRedrawMenusAndMicWorksFromNestedLists() {
         start()
         click("Song 1")
@@ -215,22 +247,22 @@ class CarLyricsScreenTest {
         assertEquals(2, manager.screenStack.size)
     }
 
-    @Test fun playerFavoriteTogglesWithoutRestartingAndAppearsInFavorites() {
+    @Test fun favoritesInBrowseDoNotRestartPlaybackAndPlayerHasOnlyPrimaryControls() {
         start()
         click("Song 1")
-        fun favorite() = (manager.top.onGetTemplate() as MapWithContentTemplate).mapController!!.mapActionStrip!!.actions[2]
-        val original = favorite().icon
-        favorite().onClickDelegate!!.sendClick(done)
-        assertTrue(SavedVideos(app).contains(videos.first().id))
-        assertNotEquals(original, favorite().icon)
-        assertEquals(1, player.selections.size)
+        val playing = manager.top.onGetTemplate() as MapWithContentTemplate
+        assertNull(playing.mapController!!.mapActionStrip)
+        assertEquals(4, controls().actions.size)
         controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Save current video")
+        assertTrue(SavedVideos(app).contains(videos.first().id))
+        assertEquals(1, player.selections.size)
         click("Favorites")
         click("Song 1")
-        favorite().onClickDelegate!!.sendClick(done)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        click("Save current video")
         assertFalse(SavedVideos(app).contains(videos.first().id))
-        val map = (manager.top.onGetTemplate() as MapWithContentTemplate).mapController!!
-        assertEquals(3, map.mapActionStrip!!.actions.size)
+        returnToVideo()
         assertTrue(player.hasCompactHeader)
         val pane = ((manager.top.onGetTemplate() as MapWithContentTemplate).contentTemplate as androidx.car.app.model.PaneTemplate).pane!!
         assertTrue(pane.rows.single().texts.isEmpty())

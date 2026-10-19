@@ -1,0 +1,2 @@
+Simpler phone and car controls, with thumbnail search results and song menus for Play now, Play next, Queue, and Add to album.
+Improved Shizuku setup, reconnect and repair. Native video now continues while the phone is locked and its screen is off.

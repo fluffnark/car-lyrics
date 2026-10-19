@@ -33,27 +33,56 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
     private var initializing = false
     private var failure: String? = null
     val detail: String? get() = when {
-        !authorized() -> "Enable native Morphe in the phone app once"
+        !running() -> "Shizuku stopped. Open Shizuku on the phone and tap Start."
+        !authorized() -> "Allow this Car Lyrics app in Shizuku on the phone"
         failure != null -> failure
         !ready -> "Starting native Morphe…"
         else -> null
     }
-    private val connection: ServiceConnection = object : ServiceConnection {
+    private var epoch = 0
+    private val binderDead = Shizuku.OnBinderDeadListener { main.post { disconnected() } }
+    private val binderReceived = Shizuku.OnBinderReceivedListener { main.post {
+        if (!closed) { prepare(); changed() }
+    } }
+    init {
+        Shizuku.addBinderDeadListener(binderDead)
+        Shizuku.addBinderReceivedListener(binderReceived)
+    }
+    private fun disconnected() {
+        if (closed) return
+        clearBinding()
+        remote = null
+        ready = false
+        bound = false
+        initializing = false
+        main.removeCallbacks(bindTimeout)
+        failure = "Native player disconnected. Use Repair picture or restart Shizuku."
+        changed()
+    }
+    private var connection: ServiceConnection? = null
+    private var requestSerial = 0
+    private fun newConnection(attempt: Int) = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            if (closed || binder == null) return
+            if (closed || attempt != epoch || connection !== this || binder == null) return
             remote = INativeMorphe.Stub.asInterface(binder)
             main.removeCallbacks(bindTimeout)
-            // Binding while browsing is cheap and must not stop phone playback.
-            // Create the Morphe display only after an explicit video selection.
             if (pending != null) initializeDisplay()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
-            remote = null
-            ready = false
-            bound = false
-            initializing = false
-            failure = "Native player disconnected. Use Repair picture or restart Shizuku."
-            changed()
+            if (!closed && attempt == epoch && connection === this) disconnected()
+        }
+    }
+    private fun clearBinding(removeService: Boolean = false) {
+        val previous = connection
+        connection = null
+        bound = false
+        epoch++
+        main.removeCallbacks(bindTimeout)
+        // remove=true stops the remote service but does not clear SDK listeners.
+        // Clear client callbacks first, while still on the owning UI thread.
+        if (previous != null) {
+            runCatching { Shizuku.unbindUserService(args, previous, false) }
+            if (removeService) runCatching { Shizuku.unbindUserService(args, previous, true) }
         }
     }
     fun attach(container: SurfaceContainer) {
@@ -71,9 +100,11 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
     }
     fun play(video: KaraokeVideo, positionMs: Long = 0, recover: Boolean = false) {
         if (closed) return
+        requestSerial++
         pending = video to positionMs
         failure = null
         if (!authorized()) { changed(); return }
+        if (remote?.asBinder()?.isBinderAlive == false) disconnected()
         if (recover && remote != null) { ready = false; initializeDisplay(); return }
         if (ready) { dispatchPending(); return }
         if (remote != null && !initializing) { initializeDisplay(); return }
@@ -84,16 +115,19 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         if (closed || !authorized() || remote != null) return
         if (!bound) {
             try {
+                // A server death can prevent unbind from clearing the SDK registry.
+                runCatching { Shizuku.unbindUserService(args, connection ?: newConnection(epoch), false) }
+                val listener = newConnection(++epoch)
+                connection = listener
                 bound = true
-                Shizuku.bindUserService(args, connection)
+                Shizuku.bindUserService(args, listener)
                 main.postDelayed(bindTimeout, 12_000)
             } catch (error: Exception) { bound = false; failed(error) }
         }
     }
     private val bindTimeout: Runnable = Runnable {
         if (!closed && remote == null) {
-            runCatching { Shizuku.unbindUserService(args, connection, true) }
-            bound = false
+            clearBinding(removeService = true)
             failed(IllegalStateException("Shizuku connection timed out"))
         }
     }
@@ -101,6 +135,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         val service = remote ?: return
         if (initializing) return
         initializing = true
+        val attempt = epoch
         val previousRenderer = renderer
         worker.execute {
             var output: MorpheVideoRenderer? = previousRenderer
@@ -109,7 +144,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
                 if (output == null) output = MorpheVideoRenderer(1280, 720)
                 service.create(output!!.input, lifetime)
             }.onSuccess { id -> main.post {
-                    if (!closed) {
+                    if (!closed && attempt == epoch && service === remote) {
                         renderer = output
                         output!!.setCompactHeader(compactHeader)
                         target?.let { output!!.attach(it, visible) }
@@ -123,7 +158,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
                 } }
                 .onFailure { error ->
                     if (output !== previousRenderer) output?.close()
-                    main.post { failed(error) }
+                    main.post { if (attempt == epoch && service === remote) failed(error) }
                 }
         }
     }
@@ -131,11 +166,18 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         val request = pending ?: return
         val service = remote ?: return
         pending = null
+        val serial = requestSerial
+        val attempt = epoch
         worker.execute {
             val started = android.os.SystemClock.elapsedRealtime()
             runCatching { service.play(request.first.id, request.second) }
                 .onSuccess { Log.i(TAG, "native video=${request.first.id} launchMs=${android.os.SystemClock.elapsedRealtime() - started}") }
-                .onFailure { error -> main.post { failed(error) } }
+                .onFailure { error -> main.post {
+                    if (!closed && attempt == epoch && service === remote) {
+                        if (requestSerial == serial && pending == null) pending = request
+                        failed(error)
+                    }
+                } }
         }
     }
     private fun failed(error: Throwable) {
@@ -147,13 +189,16 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         changed()
     }
     fun close() {
+        if (closed) return
         closed = true
+        clearBinding(removeService = true)
+        Shizuku.removeBinderDeadListener(binderDead)
+        Shizuku.removeBinderReceivedListener(binderReceived)
         main.removeCallbacks(bindTimeout)
         val service = remote
         worker.execute {
             runCatching { service?.release() }
             main.post {
-                if (bound) runCatching { Shizuku.unbindUserService(args, connection, true) }
                 renderer?.close()
                 renderer = null
             }
@@ -163,6 +208,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
     companion object {
         private const val TAG = "CarLyricsNative"
         fun enabled(context: Context) = context.getSharedPreferences("car_lyrics", 0).getBoolean("native_morphe", false)
+        fun running() = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
         fun authorized() = runCatching { Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false)
     }
 }

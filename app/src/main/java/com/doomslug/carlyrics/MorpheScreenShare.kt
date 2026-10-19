@@ -73,15 +73,31 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
             video?.let(::select)
         }
     }
+    private var reconnectPoint: MorpheResumePoint? = null
+    private var lastPoint: MorpheResumePoint? = null
+    private val binderDead = rikka.shizuku.Shizuku.OnBinderDeadListener { main.post {
+        if (!closed && nativeMode && video != null) {
+            val controller = MorpheMediaAccess.controller(context)
+            reconnectPoint = if (controller?.metadata != null) MorpheResumePoint.capture(video,
+                videoToSave(video), timeline, controller.playbackState?.state == android.media.session.PlaybackState.STATE_PAUSED)
+                else lastPoint ?: video?.let { MorpheResumePoint(it, 0, status != PlaybackStatus.PAUSED) }
+            waitingForSetup = true
+            report()
+        }
+    } }
+    private val binderReceived = rikka.shizuku.Shizuku.OnBinderReceivedListener { main.post { if (!closed) report() } }
     private val sessionChanged: () -> Unit = { if (!closed && video != null) report() }
     private val poll = object : Runnable {
         override fun run() {
             if (closed) return
+            if (nativeMode && !MorpheNativeDisplay.running()) ShizukuConnection.refresh(context)
             if (video != null) report()
             main.postDelayed(this, 700)
         }
     }
     init {
+        rikka.shizuku.Shizuku.addBinderDeadListener(binderDead)
+        rikka.shizuku.Shizuku.addBinderReceivedListener(binderReceived)
         MorpheCaptureGrant.observe(sessionChanged)
         prefs.registerOnSharedPreferenceChangeListener(backendChanged)
         main.post(poll)
@@ -127,6 +143,8 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     override fun select(video: KaraokeVideo) {
         if (closed || !KaraokeVideo.ID.matches(video.id)) return
         this.video = video
+        lastPoint = MorpheResumePoint(video, 0, true)
+        reconnectPoint = null
         recovery = null
         launchError = null
         waitingForSetup = !MorpheMediaAccess.enabled(context) ||
@@ -167,6 +185,8 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     override fun close() {
         closed = true
         main.removeCallbacksAndMessages(null)
+        rikka.shizuku.Shizuku.removeBinderDeadListener(binderDead)
+        rikka.shizuku.Shizuku.removeBinderReceivedListener(binderReceived)
         MorpheCaptureGrant.removeObserver(sessionChanged)
         prefs.unregisterOnSharedPreferenceChangeListener(backendChanged)
         nativeDisplay?.close()
@@ -180,11 +200,26 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
         // controls are ready. Later status updates must never restart playback.
         if (waitingForSetup && MorpheMediaAccess.enabled(context) &&
             (if (nativeMode) MorpheNativeDisplay.authorized() else MorpheCaptureGrant.isGranted)) {
-            video?.let(::select)
+            val point = reconnectPoint
+            reconnectPoint = null
+            if (nativeMode && point != null) {
+                waitingForSetup = false
+                val controller = MorpheMediaAccess.controller(context)
+                video = point.video
+                recovery = MorpheRecovery(controller?.sessionToken, point.positionMs, point.resume)
+                native.play(point.video, point.positionMs, recover = true)
+            } else video?.let(::select)
             return
         }
         if (statusDetail != null) update(PlaybackStatus.ERROR)
-        else update(MorpheMediaAccess.status(MorpheMediaAccess.controller(context)?.playbackState))
+        else {
+            val controller = MorpheMediaAccess.controller(context)
+            val state = controller?.playbackState?.state
+            if (state == android.media.session.PlaybackState.STATE_PLAYING || state == android.media.session.PlaybackState.STATE_PAUSED)
+                lastPoint = MorpheResumePoint.capture(video, videoToSave(video), timeline,
+                    state == android.media.session.PlaybackState.STATE_PAUSED)
+            update(MorpheMediaAccess.status(controller?.playbackState))
+        }
     }
     private fun update(next: PlaybackStatus) {
         val title = MorpheMediaAccess.controller(context)?.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)

@@ -1,0 +1,27 @@
+{
+  "versionName": "0.6.1",
+  "versionCode": 20,
+  "package": "com.doomslug.carlyrics",
+  "bundleSha256": "df19c20c56f1c923535af0c02db9c461e34843319caa3c763f91806671374841",
+  "unitTests": 43,
+  "unitFailures": 0,
+  "checks": [
+    "lintDebug",
+    "assemblePoiProbe",
+    "assembleRelease",
+    "bundleRelease",
+    "APK/AAB signature verification"
+  ],
+  "play": {
+    "track": "Internal testing",
+    "status": "Available to internal testers",
+    "publishedLocal": "2026-10-18T16:24:00-06:00",
+    "installed": {
+      "versionCode": 20,
+      "versionName": "0.6.1",
+      "certificateSha256": "951ebe45ed00c2cb66cab5a4ad21e0f6a892e98c54fa8338e7039bd789bd7fb7",
+      "sameSignerAsBefore": true,
+      "installer": "com.android.vending"
+    }
+  }
+}

@@ -1,59 +1,64 @@
 # Car Lyrics
 
+Spotify karaoke imports: open **Albums → Spotify playlists → Connect Spotify**, then **Refresh playlists**. All playlist pages are inventoried; available title-and-artist karaoke matches appear as albums on phone and car. **Resume matching** keeps saved work, **Import CSV** handles complete exported lists, and import details let you choose corrections through search. Public embed previews are labelled whenever full coverage cannot be verified. See [v22 validation and release record](docs/RELEASE_V22.md).
+
+
 Private Android Auto karaoke prototype for a 2021 Mazda CX-5, using the installed **Morphe YouTube** app on the phone as its player. Car Lyrics opens selected YouTube URLs in Morphe on a dedicated native display, renders that display on the car surface, and controls Morphe’s media session. Android screen sharing remains available as a backup. Your existing Morphe login stays in Morphe.
 
-## Current test build — 0.5.2 (18), October 5, 2026
+## Current Play release — 0.7.0 (22), October 18, 2026
 
-**Car Lyrics POI Dev v18** is installed alongside the Play-installed **v17** on the Pixel 7a. The test variant uses the same POI category and layout as the release, with separate data in `com.doomslug.carlyrics.dev`.
+**Car Lyrics 0.7.0 (22)** is published on the existing Play internal testing track. Spotify playlist import is available in Albums; the release passed 51 tests, debug/release lint and signature checks. See [v22 verification](docs/RELEASE_V22.md) for installation and head-unit evidence. The separate POI Dev copy remains available for development.
 
-- **Larger video in split view:** a shorter player header frees the area beneath it. The measured Mazda test viewport increases from 238×134 to 597×336, retaining the complete frame and clearing the right-hand map/media region. Android Auto still controls whether the app occupies the full display.
-- **Favorite on the video page:** select the star with the knob; saved videos appear under **Browse → Favorites**. The button resolves Morphe's current media metadata so an autoplay video is not silently mistaken for the prior selection.
-- **Startup:** Shizuku binds while browsing, and graphics initialization runs off the UI thread. Morphe uses a 1280×720@320 landscape phone display instead of a tablet-sized logical layout.
-- Voice search, live passenger queue, stable menu scrolling, Now playing, seek, and Repair picture remain available.
+- **Recovery:** accurate setup status distinguishes stopped Shizuku, missing authorization, missing Morphe, and missing playback controls. Open Shizuku and Repair picture/reconnect are available on the phone. A live Shizuku restart can reconnect an existing car session and restore its selected song, position and paused state.
+- **Minimal UI:** compact connection status, flat thumbnail rows, Explore / Queue / Albums tabs, and a single song menu. Search filters and setup details open only when needed. The car player has four main controls; seek, repair, and favorites are in Browse.
+- **Passenger search:** thumbnails, karaoke preference, provider preference, and library-only search; each result has **Play now**, **Play next**, **Queue**, and **Add to album**. Named albums/playlists are local, persist across reload, and appear on both phone and car. Repeated adds do not remove songs.
+- **USB tools:** `./tools/caraoke doctor`, `repair`, `reload`, and `logs` locate the SDK/phone and current Shizuku starter. Reload updates only the separate Dev copy with `adb install -r`, preserving queues and settings. Use `--serial` when several devices are connected.
 
-Upload the signed **0.5.2 (18)** release AAB to the existing Play internal track, then update **Car Lyrics** through Play for the Mazda. No Play upload was performed. See [v18 changes and testing](docs/RELEASE_V18.md).
+Shizuku was stopped after the phone had rebooted. Its installed **Start on boot (root)** setting does not establish automatic startup on this unrooted phone. Start Shizuku through wireless debugging after a reboot, or use the USB repair command. Shizuku itself must be running before Car Lyrics can attach.
+
+See [v20 design and verification](docs/RELEASE_V20.md) and [v19 recovery details](docs/RELEASE_V19.md). Earlier [v18 layout/favorites evidence](docs/RELEASE_V18.md) remains applicable.
 
 ## Start a session
 
 1. On the phone, open **Car Lyrics** (or **POI Dev** for DHU testing) and enable **Morphe controls**. Android calls this notification access; Car Lyrics uses Morphe’s playback state and transport controls, not notification contents.
-2. Ensure **Shizuku** says it is running. In Car Lyrics choose **Enable native Morphe • Shizuku** and allow access. These permissions and native mode are already configured for both packages on the connected Pixel.
+2. Ensure **Shizuku** says it is running. In Car Lyrics tap **Setup** at the top right, follow the primary connection action, and allow Shizuku access if requested. These permissions and native mode are already configured for both packages on the connected Pixel.
 3. In the desktop Android Auto emulator, open **Car Lyrics POI Dev**, then choose a song, Queue, or playlist. Selection launches the installed Morphe on its separate 1280×720 display. Use the microphone, Play/Pause, Next, and Browse controls. Previous is in Browse.
-4. Use **Now playing** to return from any menu, **Seek current video** to change position, and **Repair picture** if the image needs recovery. The phone’s fixed **Return to current video** button returns the car UI too.
+4. Use **Now playing** to return from any menu, **Seek current video** to change position, and **Repair picture** if the image needs recovery. Tap the phone’s now-playing bar to return the car UI too.
 
-For the backup, choose **Use screen-sharing backup → Start Morphe sharing → Share one app → YouTube Morphe**. Android requires fresh consent when capture ends. In backup mode, Morphe must remain visible on the unlocked phone; opening passenger search can hide its captured video.
+For the backup, open **Setup/Ready → More options → Use screen sharing**, then choose **Share one app → YouTube Morphe** in Android’s picker. Android requires fresh consent when capture ends. In backup mode, Morphe must remain visible on the unlocked phone; opening passenger search can hide its captured video.
 
-Morphe owns video decoding, audio, and your existing login. Car Lyrics does not store account credentials or record frames. Native mode needs Shizuku running; automatic startup after the next phone reboot and locked-phone behavior still need testing. See [native implementation and test evidence](docs/MORPHE_NATIVE.md).
+Morphe owns video decoding, audio, and your existing login. Car Lyrics does not store Morphe account credentials or record frames. Optional Spotify connection tokens are encrypted with Android Keystore. Native mode needs Shizuku running. The installed start-on-boot setting is root-only; on this phone, use wireless Start or USB repair after reboot. Native video continued with this Pixel locked and its physical display off in DHU testing. See [native implementation and test evidence](docs/MORPHE_NATIVE.md).
 
 ## Install for the physical Mazda
 
 Car App Library apps must be installed from a trusted source for real-vehicle testing. Android Auto’s Unknown sources option does **not** cover them; see [Google’s real-vehicle testing requirements](https://developer.android.com/training/cars/testing#test-in-real-vehicles). The POI Dev installation above was verified in the DHU, not as a sideloaded Mazda installation.
 
-1. Upload `app/build/outputs/bundle/release/app-release.aab` (**0.5.2 / 18**, package `com.doomslug.carlyrics`) to the existing **Internal testing** track and roll it out.
-2. On the Pixel, use the existing tester account/link and **update Car Lyrics through Google Play**. The separate POI Dev copy can remain installed.
-3. Open the updated **Car Lyrics** on the phone. Enable **Morphe controls** if requested, then choose **Enable native Morphe • Shizuku** and authorize **Car Lyrics**. POI Dev’s permission and native-mode preference belong to a different package and do not transfer.
-4. Check Shizuku says it is running, connect the Mazda, and open the Play-installed **Car Lyrics**. Select a song. Keep Morphe’s fullscreen preference set to Landscape.
+1. The official **Car Lyrics 0.6.1 (20)** is already installed through Play on the Pixel. Open **Car Lyrics**, whose phone header should say Ready. The separate POI Dev copy is for development.
+2. Ensure Shizuku is running, connect the Mazda, and open **Car Lyrics** from Android Auto. Select a song. Keep Morphe’s fullscreen preference set to Landscape.
+3. If phone setup is requested later, tap Setup and follow the primary action. Each app copy has its own native-mode preference and Shizuku authorization.
 
+For future updates, publish the signed release AAB on the existing Internal testing track and update through Play. The local upload-key APK cannot replace the Play-signed app by ADB.
 The release bundle includes native Morphe, Now playing, seek, recovery and visible-area fitting. The POI Dev test variant now uses the same POI host as this standard release; the optional nativeProbe variant uses the experimental navigation host. Trusted installation alone does not verify the remaining physical-car behavior.
 
-Automatic Play uploads require Google Play Developer API credentials with access to this app and its testing releases. None are configured in this repository as of October 5. The local signing key signs the bundle; it does not grant Play Console access.
+Automatic Play uploads require Google Play Developer API credentials with access to this app and its testing releases. API credentials are not configured in this repository; the October 18 release was published manually through the signed-in Play Console browser. The local signing key signs the bundle; it does not grant Play Console access.
 
 ## Latest verification
 
-Pixel 7a / Android 17 / Morphe 21.04.223 / Shizuku, tested with the standard POI host and a 1280×480 rotary Mazda DHU profile:
+Pixel 7a / Android 17 / Morphe 21.04.223 / Shizuku, with the standard POI host and a 1280×480 rotary Mazda DHU profile:
 
-- Reproduced the tiny picture, then verified the larger complete video frame beside the map card.
-- Saved videos from the player and found them in Favorites without restarting playback.
-- Next changed the selected queue song; the native display was retained and the picture stayed large.
-- Favorites and Now playing worked with `restrict all`; returning preserved the surface layout.
-- One cold start took approximately 3.1 seconds to PLAYING; a warm song change took approximately 1.1 seconds. These are individual observations, not a benchmark.
+- 43 unit tests, debug lint, release APK/AAB builds, and signature verification pass.
+- Phone search thumbnails, song actions, queue ordering, and saved albums were exercised on the device.
+- DHU voice search recognized recorded speech, returned live provider results, and rotary selection opened the matching native video.
+- The simplified four-control player, Browse seek, phone return to current video, and Play next → rotary Next worked with driving restrictions enabled.
+- V20 restored paused and playing sessions across three Shizuku restarts, recovered a killed helper, and kept video visible with the Pixel locked and its physical display off. Compact 800×480 and wide 1280×480 DHU reconnects passed.
 
-The release notes record the remaining tests and limitations. Actual Mazda hardware, unusual host/font layouts, phone reboot/lock behavior, real cabin microphone recognition, and measured A/V synchronization remain to be checked. The user reported native playback on the physical Mazda with the previous release.
+See [v20 observations and remaining limits](docs/RELEASE_V20.md). Physical Mazda hardware, cabin microphone recognition, measured A/V synchronization, and reboot auto-start remain separate checks. The user reported native playback on the physical Mazda with the previous release. Automatic end-of-video queue advancement remains unfinished.
 
 Previous voice, passenger queue, and scrolling evidence is in [v17 test notes](docs/RELEASE_V17.md). The v17 repeat-search quota device retest remains incomplete. This is a private surface experiment, not a claim of public Play eligibility.
 
 ## Karaoke library and queues
 
-The car has Sing King recent uploads, a local index of 5,000 titles, curated collections, and public YouTube search across providers. Car and phone search both accept song, artist, album, genre, and provider names. **Queue** and **Mix** on phone results save videos locally; open Queue or Playlists on the car to select them. Next/Previous follow the list selected in Car Lyrics. Automatic queue advancement and reconciling Morphe's own autoplay are still unfinished. Manual Next/Previous read the latest queue contents, including phone additions.
+The car has Sing King recent uploads, a local index of 5,000 titles, curated collections, and public YouTube search across providers. Car and phone search both accept song, artist, album, genre, and provider names. **Queue** and **Add to album** on phone results save videos locally; open Queue or Playlists on the car to select them. Next/Previous follow the list selected in Car Lyrics. Automatic queue advancement and reconciling Morphe's own autoplay are still unfinished. Manual Next/Previous read the latest queue contents, including phone additions.
 
 Lyrics are the text baked into each karaoke video. Availability depends on whether Morphe can play that video for your account and region; this is not a guarantee that every YouTube upload is accessible. The old embedded player is retained in source, but new installations default to Morphe.
 
@@ -61,7 +66,7 @@ Lyrics are the text baked into each karaoke video. Availability depends on wheth
 
 On the car: **Search YouTube → microphone in the search field → say a song and artist → select a result**. For example, say “Queen Bohemian Rhapsody karaoke” or “find karaoke for Halo by Beyoncé.” Include “karaoke” to favor instrumental versions. Results use normal Android Auto rows; selecting one goes through the existing Morphe playback controls. This is the microphone inside Car Lyrics search, not a global “Hey Google, play in Car Lyrics” integration.
 
-On the phone: scroll to **Passenger Queue → Voice search**, speak, then use **Queue** or **Mix** beside a result. Typing and the keyboard Search key work too. Canceling recognition leaves the existing query alone. Android Auto/the phone speech provider handles audio; Car Lyrics receives the transcript. See the [privacy policy](docs/privacy-policy.md).
+On the phone: tap the microphone beside search, speak, then tap a result to play or open its three-dot menu for **Queue**, **Play next**, **Play now**, or **Add to album**. Typing and the keyboard Search key work too. Canceling recognition leaves the existing query alone. Android Auto/the phone speech provider handles audio; Car Lyrics receives the transcript. See the [privacy policy](docs/privacy-policy.md).
 
 Local matching tolerates accents, punctuation, and common spoken commands. Library filtering runs off the UI thread, typing is debounced, and old responses cannot replace a newer search. If YouTube search fails, matching local songs remain available with a Retry action. Public YouTube page parsing may need maintenance when YouTube changes its response format.
 
@@ -110,7 +115,7 @@ Outputs:
 - `app/build/outputs/apk/poiProbe/app-poiProbe.apk` — **Car Lyrics POI Dev**, same layout/category as release, separate test package.
 - `app/build/outputs/apk/nativeProbe/app-nativeProbe.apk` — side-by-side **Car Lyrics Native Dev**, local navigation-host experiment. Do not upload this variant to Play.
 - `app/build/outputs/apk/release/app-release.apk` — standard POI prototype, locally upload-key signed. It cannot replace the Play-signed app by ADB on this Pixel.
-- `app/build/outputs/bundle/release/app-release.aab` — **0.5.2 (18)**, signed release bundle for the existing Play internal track; not uploaded by this session. The POI Dev test build matches the standard host category.
+- `app/build/outputs/bundle/release/app-release.aab` — **0.7.0 (22)**, signed release bundle published to the existing Play internal track on October 18; installed through Play on the Pixel. The POI Dev test build matches the standard host category.
 
 The upload key is configured in ignored `signing/keystore.properties`; keep the key and credentials private and backed up. The local ADB install is suitable for DHU testing. Use the Play internal-track installation for the Mazda launcher test, as previously configured.
 

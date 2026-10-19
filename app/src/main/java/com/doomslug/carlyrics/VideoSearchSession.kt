@@ -14,6 +14,7 @@ class VideoSearchSession(
     private val localWorker: Executor = localSearchWorker,
     private val changed: () -> Unit,
 ) {
+    var options = VideoSearchOptions(); private set
     var query = ""; private set
     var videos = emptyList<KaraokeVideo>(); private set
     var loading = false; private set
@@ -24,19 +25,21 @@ class VideoSearchSession(
     private var initialized = false
     private var closed = false
 
-    fun update(text: String, submitted: Boolean = false, retry: Boolean = false) {
+    fun update(text: String, submitted: Boolean = false, retry: Boolean = false, options: VideoSearchOptions = this.options) {
         if (closed) return
         val next = text.trim().take(200)
-        if (initialized && next == query && !retry) {
+        if (initialized && next == query && options == this.options && !retry) {
             if (submitted) pending?.let { main.removeCallbacks(it); it.run() }
             return
         }
         cancel()
         initialized = true
         query = next
+        this.options = options
         error = null
         val phrase = VideoSearchQuery.phrase(next)
-        videos = if (phrase.isBlank()) localVideos().distinctBy { it.id }.take(30) else emptyList()
+        val remotePhrase = options.remoteQuery(phrase)
+        videos = if (phrase.isBlank()) options.localCandidates(localVideos()).distinctBy { it.id }.take(30) else emptyList()
         loading = phrase.isNotBlank()
         changed()
         if (!loading) return
@@ -49,16 +52,16 @@ class VideoSearchSession(
             fun publish() {
                 if (closed || request != generation) return
                 videos = (remoteResult?.videos.orEmpty() + local).distinctBy { it.id }.take(30)
-                loading = remoteResult == null
+                loading = !options.libraryOnly && remoteResult == null
                 error = remoteResult?.error
                 changed()
             }
             localWorker.execute {
-                val matches = VideoSearchQuery.matches(candidates, phrase).take(30)
+                val matches = VideoSearchQuery.matches(options.localCandidates(candidates), phrase).take(30)
                 val deliver = Runnable { local = matches; publish() }
                 if (Looper.myLooper() == Looper.getMainLooper()) deliver.run() else main.post(deliver)
             }
-            remote.search(phrase) { result -> remoteResult = result; publish() }
+            if (!options.libraryOnly) remote.search(remotePhrase) { result -> remoteResult = result; publish() }
         }
         pending = task
         if (submitted) task.run() else main.postDelayed(task, 450)
@@ -76,6 +79,24 @@ class VideoSearchSession(
 
     companion object {
         private val localSearchWorker = Executors.newSingleThreadExecutor()
+    }
+}
+
+data class VideoSearchOptions(
+    val karaokeOnly: Boolean = false,
+    val provider: String = "",
+    val libraryOnly: Boolean = false,
+) {
+    fun remoteQuery(phrase: String) = listOf(phrase,
+        if (karaokeOnly && !phrase.contains("karaoke", ignoreCase = true)) "karaoke" else "",
+        provider).filter { it.isNotBlank() }.joinToString(" ")
+    fun localCandidates(videos: List<KaraokeVideo>) = when {
+        provider.equals("Sing King", true) -> {
+            val bundled = SingKingCatalog.library.asSequence().plus(SingKingCatalog.videos).map { it.id }.toHashSet()
+            videos.filter { it.id in bundled || it.title.contains(provider, true) }
+        }
+        provider.isNotBlank() -> videos.filter { it.title.contains(provider, true) }
+        else -> videos
     }
 }
 
