@@ -109,7 +109,7 @@ The included wide rotary profile is a test target; use the geometry/input config
 
 ## Release and verification records
 
-The last published internal release is **0.8.1 (25)**. The current development version is **0.9.0 (26)**; building or pushing source does not publish a Play update. See [current verification](docs/RELEASE_V26.md), [v25 playlist/matching verification](docs/RELEASE_V25.md), [native playback](docs/MORPHE_NATIVE.md), and [earlier recovery tests](docs/RELEASE_V20.md).
+The current internal testing release is **0.9.0 (26)**, published October 22, 2026. Development builds use the same version code with a separate package; building or pushing source does not publish a Play update. See [current verification](docs/RELEASE_V26.md), [v25 playlist/matching verification](docs/RELEASE_V25.md), [native playback](docs/MORPHE_NATIVE.md), and [earlier recovery tests](docs/RELEASE_V20.md).
 
 Physical head-unit behavior, cabin microphones, A/V synchronization and device reboot recovery need device-specific checks. The use of a POI custom surface is experimental and does not establish public Play eligibility.
 
