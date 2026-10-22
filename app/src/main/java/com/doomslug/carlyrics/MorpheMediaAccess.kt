@@ -13,6 +13,27 @@ import android.service.notification.NotificationListenerService
 
 /** Android grants media-session access through notification access; no notification content is read. */
 class MorpheMediaAccess : NotificationListenerService() {
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var observedId: String? = null
+    private val checkpoint = object : Runnable {
+        override fun run() {
+            val controller = controller(this@MorpheMediaAccess)
+            val state = controller?.playbackState?.state
+            if (state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_PAUSED) {
+                val history = PlaybackHistory(this@MorpheMediaAccess)
+                val selected = history.all().firstOrNull()?.video
+                videoToSave(controller?.metadata, selected)?.let { video ->
+                    if (observedId != video.id && selected?.id != video.id) history.opened(video)
+                    observedId = video.id
+                    history.checkpoint(video, timeline(this@MorpheMediaAccess))
+                }
+            }
+            handler.postDelayed(this, 5_000)
+        }
+    }
+    override fun onListenerConnected() { handler.removeCallbacks(checkpoint); handler.post(checkpoint) }
+    override fun onListenerDisconnected() { handler.removeCallbacks(checkpoint) }
+    override fun onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy() }
     companion object {
         const val PACKAGE = "app.morphe.android.youtube"
         fun component(context: Context) = ComponentName(context, MorpheMediaAccess::class.java)

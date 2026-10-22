@@ -52,6 +52,11 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     private val main = Handler(Looper.getMainLooper())
     private var container: SurfaceContainer? = null
     private var video: KaraokeVideo? = null
+    private var homeVisible = false
+    private var homeReturn: Pair<KaraokeVideo, Long>? = null
+    private val history = PlaybackHistory(context)
+    private var observedId: String? = null
+    private var lastHistoryCheckpoint = 0L
     private var closed = false
     private var status = PlaybackStatus.IDLE
     private var launchError: String? = null
@@ -86,12 +91,12 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
         }
     } }
     private val binderReceived = rikka.shizuku.Shizuku.OnBinderReceivedListener { main.post { if (!closed) report() } }
-    private val sessionChanged: () -> Unit = { if (!closed && video != null) report() }
+    private val sessionChanged: () -> Unit = { if (!closed && (video != null || homeVisible)) report() }
     private val poll = object : Runnable {
         override fun run() {
             if (closed) return
             if (nativeMode && !MorpheNativeDisplay.running()) ShizukuConnection.refresh(context)
-            if (video != null) report()
+            if (video != null || homeVisible) report()
             main.postDelayed(this, 700)
         }
     }
@@ -140,10 +145,32 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     override fun videoToSave(selected: KaraokeVideo?): KaraokeVideo? =
         MorpheMediaAccess.videoToSave(MorpheMediaAccess.controller(context)?.metadata, selected)
 
-    override fun select(video: KaraokeVideo) {
+    override fun loadHome(more: Boolean, done: (String?, String?) -> Unit) {
+        if (android.os.Build.VERSION.SDK_INT < 30) { done(null, "Native Home requires Android 11 or later."); return }
+        if (closed || !nativeMode || !MorpheNativeDisplay.authorized()) {
+            done(null, "Connect native Morphe in phone Setup to load Home."); return
+        }
+        if (!homeVisible) videoToSave(video)?.let {
+            history.checkpoint(it, timeline); homeReturn = it to (timeline?.positionMs ?: 0)
+        }
+        homeVisible = true
+        native.recommendations(more, done)
+    }
+    override fun showCurrentVideo(): Boolean {
+        if (!homeVisible) return video != null || videoToSave(null) != null
+        val entry = history.all().firstOrNull()
+        val current = homeReturn?.first ?: entry?.video ?: return false
+        playFrom(current, homeReturn?.second ?: entry?.positionMs ?: 0)
+        return true
+    }
+    override fun select(video: KaraokeVideo) = playFrom(video, 0)
+    override fun playFrom(video: KaraokeVideo, positionMs: Long) {
         if (closed || !KaraokeVideo.ID.matches(video.id)) return
+        videoToSave(this.video)?.let { history.checkpoint(it, timeline) }
+        homeVisible = false
         this.video = video
-        lastPoint = MorpheResumePoint(video, 0, true)
+        history.opened(video, positionMs)
+        lastPoint = MorpheResumePoint(video, positionMs, true)
         reconnectPoint = null
         recovery = null
         launchError = null
@@ -151,12 +178,12 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
             (if (nativeMode) !MorpheNativeDisplay.authorized() else !MorpheCaptureGrant.isGranted)
         if (nativeMode && !waitingForSetup) {
             update(PlaybackStatus.LOADING)
-            native.play(video)
+            native.play(video, positionMs)
             return
         }
         if (statusDetail != null) { update(PlaybackStatus.ERROR); return }
         update(PlaybackStatus.LOADING)
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.id}")).apply {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.id}" + if (positionMs > 0) "&t=${positionMs / 1000}s" else "")).apply {
             setPackage(MorpheMediaAccess.PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -182,19 +209,32 @@ class MorpheScreenShare(private val context: Context) : VideoPlayer {
     }
     // Browsing must not revoke Android's one-use projection grant or interrupt Morphe audio.
     override fun hide() { waitingForSetup = false }
-    override fun close() {
+    override fun close() = closeAfter { }
+    internal fun closeAfter(done: () -> Unit) {
         closed = true
         main.removeCallbacksAndMessages(null)
         rikka.shizuku.Shizuku.removeBinderDeadListener(binderDead)
         rikka.shizuku.Shizuku.removeBinderReceivedListener(binderReceived)
         MorpheCaptureGrant.removeObserver(sessionChanged)
         prefs.unregisterOnSharedPreferenceChangeListener(backendChanged)
-        nativeDisplay?.close()
+        val native = nativeDisplay
         nativeDisplay = null
+        if (native != null) native.close(done) else done()
         container?.let(MorpheCaptureGrant::detach)
         onStatus = null
     }
     private fun report() {
+        val observed = videoToSave(video)
+        val mediaStatus = MorpheMediaAccess.status(MorpheMediaAccess.controller(context)?.playbackState)
+        if (observed != null && (mediaStatus == PlaybackStatus.PLAYING || mediaStatus == PlaybackStatus.PAUSED)) {
+            if (observedId != observed.id && history.all().firstOrNull()?.video?.id != observed.id) history.opened(observed)
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (observedId != observed.id || now - lastHistoryCheckpoint >= 5_000 || mediaStatus == PlaybackStatus.PAUSED && status != PlaybackStatus.PAUSED) {
+                history.checkpoint(observed, timeline)
+                lastHistoryCheckpoint = now
+            }
+            observedId = observed.id
+        }
         if (recovery?.complete(context) == true) recovery = null
         // The song selected before setup should start once, as soon as consent and
         // controls are ready. Later status updates must never restart playback.

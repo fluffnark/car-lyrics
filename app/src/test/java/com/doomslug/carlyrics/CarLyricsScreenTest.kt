@@ -28,7 +28,7 @@ class CarLyricsScreenTest {
     private lateinit var player: FakePlayer
 
     @Before fun setup() {
-        listOf("saved_videos", "karaoke_playlists", "karaoke_queue").forEach { app.getSharedPreferences(it, 0).edit().clear().commit() }
+        listOf("saved_videos", "karaoke_playlists", "karaoke_queue", "playback_history").forEach { app.getSharedPreferences(it, 0).edit().clear().commit() }
         java.io.File(app.filesDir, "spotify_playlists").deleteRecursively()
         context = TestCarContext.createCarContext(app)
         manager = context.getCarService(ScreenManager::class.java)
@@ -45,7 +45,7 @@ class CarLyricsScreenTest {
         row.onClickDelegate!!.sendClick(done)
     }
     private fun returnToVideo() {
-        list().header!!.endHeaderActions.first { it.title.toString() == "Now playing" }.onClickDelegate!!.sendClick(done)
+        list().header!!.endHeaderActions.first { it.title.toString() == "Play current video" }.onClickDelegate!!.sendClick(done)
     }
     private fun controls() = when (val t = manager.top.onGetTemplate()) {
         is NavigationTemplate -> t.actionStrip!!
@@ -53,33 +53,37 @@ class CarLyricsScreenTest {
         else -> error("Not player")
     }
 
-    @Test fun returnFromEveryMenuKeepsTheSameVideoAndPosition() {
+    @Test fun returnFromEveryMenuKeepsTheSameVideoAndOriginalScreen() {
         start(true)
         click("Song 1")
         repeat(8) {
             controls().actions[3].onClickDelegate!!.sendClick(done)
+            manager.popToRoot()
             click("Queue")
+            val queue = manager.top
+            returnToVideo()
+            controls().actions[3].onClickDelegate!!.sendClick(done)
+            assertSame(queue, manager.top)
+            manager.popToRoot()
+            click("Playlists"); click("My karaoke mix")
+            val playlist = manager.top
             returnToVideo()
             assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
             assertTrue(manager.screenStack.size <= 4)
             controls().actions[3].onClickDelegate!!.sendClick(done)
-            click("Playlists")
-            click("My karaoke mix")
-            returnToVideo()
-            assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
-            assertTrue(manager.screenStack.size <= 4)
-            controls().actions[3].onClickDelegate!!.sendClick(done)
+            assertSame(playlist, manager.top)
+            manager.popToRoot()
             click("Search YouTube")
-            val search = manager.top.onGetTemplate() as SearchTemplate
+            val originalSearch = manager.top
+            val search = originalSearch.onGetTemplate() as SearchTemplate
             search.actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
-            assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
-            assertTrue(manager.screenStack.size <= 4)
-            assertTrue(manager.screenStack.size <= 3)
+            controls().actions[3].onClickDelegate!!.sendClick(done)
+            assertSame(originalSearch, manager.top)
+            assertEquals(2, manager.screenStack.size)
+            manager.popToRoot(); returnToVideo()
         }
         assertEquals(listOf(videos.first()), player.selections)
-        assertEquals(0, player.hides)
-        assertEquals(0, player.closes)
-        assertEquals(1, player.prepares)
+        assertEquals(0, player.hides); assertEquals(0, player.closes); assertEquals(1, player.prepares)
     }
 
     @Test fun backReturnsTheOriginalTemplateAndMenuContent() {
@@ -145,6 +149,7 @@ class CarLyricsScreenTest {
         assertTrue(manager.top.onGetTemplate() is NavigationTemplate)
         assertEquals(1, player.selections.size)
         controls().actions[3].onClickDelegate!!.sendClick(done)
+        manager.popToRoot()
         click("Repair picture")
         assertEquals(1, player.repairs)
     }
@@ -239,11 +244,9 @@ class CarLyricsScreenTest {
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         assertTrue(appManager.templatesReturned.none { it.first === menu })
         list().header!!.endHeaderActions.last().onClickDelegate!!.sendClick(done)
-        // The host must see the root Back template before the new search push.
-        assertTrue(manager.top.onGetTemplate() is ListTemplate)
-        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         assertTrue(manager.top.onGetTemplate() is SearchTemplate)
-        assertEquals(2, manager.screenStack.size)
+        manager.pop()
+        assertSame(menu, manager.top)
     }
 
     @Test fun poiPlayerStatusAndSongChangesPreservePaneRefreshIdentity() {
@@ -260,8 +263,6 @@ class CarLyricsScreenTest {
             assertEquals(originalTitles, pane().rows.map { it.title.toString() })
         }
         controls().actions[0].onClickDelegate!!.sendClick(done)
-        assertEquals("Sing King • Recent", list().header!!.title.toString())
-        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         assertTrue(manager.top.onGetTemplate() is SearchTemplate)
         assertEquals(2, manager.screenStack.size)
     }
@@ -279,12 +280,56 @@ class CarLyricsScreenTest {
         click("Favorites")
         click("Song 1")
         controls().actions[3].onClickDelegate!!.sendClick(done)
+        manager.popToRoot()
         click("Save current video")
         assertFalse(SavedVideos(app).contains(videos.first().id))
         returnToVideo()
         assertTrue(player.hasCompactHeader)
         val pane = ((manager.top.onGetTemplate() as MapWithContentTemplate).contentTemplate as androidx.car.app.model.PaneTemplate).pane!!
         assertTrue(pane.rows.single().texts.isEmpty())
+    }
+
+    @Test fun historyResumesAndPlayerSearchReturnsToExistingSearchWithoutStackGrowth() {
+        PlaybackHistory(app).opened(videos[4], 45_000)
+        start()
+        click("History"); val history = manager.top
+        click("Song 5")
+        assertEquals(videos[4], player.selections.single())
+        assertEquals(45_000L, player.sought)
+        controls().actions[3].onClickDelegate!!.sendClick(done)
+        assertSame(history, manager.top)
+        list().header!!.endHeaderActions.last().onClickDelegate!!.sendClick(done)
+        val search = manager.top
+        repeat(10) {
+            (manager.top.onGetTemplate() as SearchTemplate).actionStrip!!.actions.single().onClickDelegate!!.sendClick(done)
+            controls().actions[0].onClickDelegate!!.sendClick(done)
+            assertSame(search, manager.top)
+            assertTrue(manager.screenStack.size <= 4)
+        }
+        assertEquals(1, player.selections.size)
+    }
+
+    @Test fun homeUsesNativeRowsAndPreservesBrowseScreen() {
+        start()
+        val original = manager.top
+        click("Home")
+        assertEquals(1, player.homes)
+        assertEquals("For you", list().header!!.title.toString())
+        assertTrue(list().singleList!!.items.all { it is Row })
+        manager.pop()
+        assertSame(original, manager.top)
+        assertTrue(player.selections.isEmpty())
+    }
+
+    @Test fun historyPagesRemainBoundedAndRetainOlderEntries() {
+        repeat(65) { PlaybackHistory(app).opened(KaraokeVideo("%011d".format(it), "History $it")) }
+        start(); click("History")
+        assertEquals("History · 1/4", list().header!!.title.toString())
+        repeat(3) { click("More history"); assertEquals(2, manager.screenStack.size) }
+        assertEquals("History · 4/4", list().header!!.title.toString())
+        assertTrue(list().singleList!!.items.filterIsInstance<Row>().any { it.title.toString() == "History 0" })
+        click("Previous page")
+        assertEquals("History · 3/4", list().header!!.title.toString())
     }
 
     @org.robolectric.annotation.Implements(androidx.car.app.constraints.ConstraintManager::class)
@@ -307,6 +352,8 @@ class CarLyricsScreenTest {
         var detail: String? = null
         override val statusDetail get() = detail
         val selections = mutableListOf<KaraokeVideo>()
+        var homes = 0
+        override fun loadHome(more: Boolean, done: (String?, String?) -> Unit) { homes++; done("[]", null) }
         var prepares = 0
         override fun prepare() { prepares++ }
         var pauses = 0; var resumes = 0; var hides = 0; var closes = 0; var repairs = 0

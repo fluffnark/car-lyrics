@@ -13,8 +13,8 @@ android {
         applicationId = "com.doomslug.carlyrics"
         minSdk = 29
         targetSdk = 36
-        versionCode = 25
-        versionName = "0.8.1"
+        versionCode = 26
+        versionName = "0.9.0"
         // Public PKCE client identifier; no Spotify client secret is used or shipped.
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"ad5605f190f24e1fa6f9478984d9e694\"")
         manifestPlaceholders["carAppCategory"] = "androidx.car.app.category.POI"

@@ -11,6 +11,14 @@ import org.json.JSONObject
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SpotifyImportTest {
+    @Test fun additionalProviderIndexMatchesSongsBeyondTheBrowseSnapshot() {
+        val app = RuntimeEnvironment.getApplication()
+        SingKingCatalog.initialize(app)
+        val catalog = KaraokeMatchingCatalog.index(app)
+        assertNotNull(catalog.match(SpotifySong("rush", "Tom Sawyer", listOf("Rush"))))
+        assertNotNull(catalog.match(SpotifySong("flipturn", "August", listOf("flipturn"))))
+        assertNull(catalog.match(SpotifySong("wrong", "Tom Sawyer", listOf("Unrelated Artist"))))
+    }
     @Test fun matchesArtistAndSongButRejectsOriginalLiveAndLongerTitles() {
         val song = SpotifySong("one", "Hello", listOf("Adele"))
         val correct = KaraokeVideo("abcdefghijk", "Adele - Hello (Karaoke Version)")

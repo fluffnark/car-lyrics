@@ -37,8 +37,21 @@ internal class SpotifyLibrary(private val get: (String) -> JSONObject) {
     }
 }
 
+/** Restricted public previews must never erase previously imported songs or manual choices. */
+internal fun mergeSpotifyPreview(metadata: SpotifyPlaylist, songs: List<SpotifySong>, previous: SpotifyPlaylist?): SpotifyPlaylist {
+    val old = previous?.songs.orEmpty().associateBy { it.song.key }
+    val read = songs.map { song -> old[song.key]?.copy(song = song) ?: SpotifyMatch(song) }
+    val readKeys = songs.map { it.key }.toSet()
+    val complete = metadata.total > 0 && songs.size >= metadata.total
+    val known = if (complete) read else read + previous?.songs.orEmpty().filter { it.song.key !in readKeys }
+    val total = maxOf(metadata.total, known.size)
+    return metadata.copy(total = total, songs = known, problem = if (complete) null else
+        "Public preview · ${songs.size} read · ${known.size} known${if (metadata.total > 0) " of $total" else " (total unknown)"} tracks. Import CSV for the full list.")
+}
+
 internal object SpotifyImporter {
     private const val READ_PENDING = "Not read yet. Refresh or resume to continue."
+    private const val MATCH_POLICY = 3
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val observers = mutableSetOf<() -> Unit>()
@@ -58,7 +71,7 @@ internal object SpotifyImporter {
             val store = SpotifyImportStore(app)
             try {
                 val policy = app.getSharedPreferences("spotify_matching", Context.MODE_PRIVATE)
-                val recheck = retryMissing || policy.getInt("policy", 0) < 2
+                val recheck = retryMissing || policy.getInt("policy", 0) < MATCH_POLICY
                 SingKingCatalog.initialize(app)
                 val api = SpotifyLibrary { SpotifyAccount.get(app, it) }
                 val inventory = imported ?: if (refresh) api.playlists() else store.all()
@@ -84,34 +97,37 @@ internal object SpotifyImporter {
                         } catch (e: SpotifyHttpError) {
                             if (e.status != 403) throw e
                             val public = runCatching { SpotifyPublicPlaylist.fetch(metadata.id) }.getOrDefault(emptyList())
-                            if (public.isEmpty()) (old ?: metadata).copy(name = metadata.name, problem = e.message)
-                            else {
-                                val previous = old?.songs.orEmpty().associateBy { it.song.key }
-                                metadata.copy(total = maxOf(metadata.total, public.size), songs = public.map { song ->
-                                    previous[song.key]?.copy(song = song) ?: SpotifyMatch(song)
-                                }, problem = if (metadata.total > 0 && public.size >= metadata.total) null
-                                    else "Public preview · ${public.size} tracks. Import CSV for the full list.")
-                            }
+                            if (public.isEmpty()) (old ?: metadata).copy(name = metadata.name,
+                                total = maxOf(old?.total ?: 0, metadata.total), problem = e.message)
+                            else mergeSpotifyPreview(metadata, public, old)
                         }
                         store.put(fetched)
                     }
                 }
                 var lists = store.all()
-                val cache = lists.flatMap { it.songs }.filter { it.video != null }.associateBy { it.song.key }.toMutableMap()
+                val cache = lists.flatMap { it.songs }.filter { it.video != null }.sortedBy { it.state == "manual" }
+                    .associateBy { it.song.key }.toMutableMap()
+                val recordings = lists.flatMap { it.songs }.filter { it.video != null && it.state != "manual" }
+                    .associateBy { KaraokeMatcher.recordingKey(it.song) }.toMutableMap()
+                val checkedThisRun = mutableMapOf<String, SpotifyMatch>()
+                val library = KaraokeMatchingCatalog.index(app)
+                val lookup = KaraokeLookup()
                 // Give the whole library its local matches before slower network searches.
                 for ((number, p) in lists.withIndex()) {
                     if (cancelled) break
                     update("Checking saved library · ${number + 1}/${lists.size} · ${p.name}")
                     val updated = p.copy(songs = p.songs.map { row ->
                         if (row.video != null) row else {
-                            val video = cache[row.song.key]?.video ?: KaraokeMatcher.match(row.song, SingKingCatalog.library + SingKingCatalog.videos)
+                            val video = cache[row.song.key]?.video ?: recordings[KaraokeMatcher.recordingKey(row.song)]?.video
+                                ?: library.match(row.song)
                             if (video == null) row else row.copy(video = video, state = "matched", checkedAt = System.currentTimeMillis()).also { cache[row.song.key] = it }
                         }
                     })
                     if (updated != p) store.put(updated)
                 }
                 lists = store.all()
-                cache.putAll(lists.flatMap { it.songs }.filter { it.video != null || it.state == "missing" }.associateBy { it.song.key })
+                cache.putAll(lists.flatMap { it.songs }.filter { it.video != null || it.state == "missing" }
+                    .sortedBy { if (it.state == "manual") 2 else if (it.video != null) 1 else 0 }.associateBy { it.song.key })
                 var consecutiveErrors = 0
                 for ((number, p) in lists.withIndex()) {
                     if (cancelled) break
@@ -122,26 +138,16 @@ internal object SpotifyImporter {
                         val row = playlist.songs[index]
                         if (row.video != null || (row.state == "missing" && !recheck && System.currentTimeMillis() - row.checkedAt < 7 * 86_400_000L)) continue
                         update("${number + 1}/${lists.size} · ${playlist.name}\n${index + 1}/${playlist.songs.size} · ${row.song.title}")
-                        val cached = cache[row.song.key]
+                        val recordingKey = KaraokeMatcher.recordingKey(row.song)
+                        val cached = cache[row.song.key]?.takeIf { it.video != null } ?: recordings[recordingKey]
+                            ?: checkedThisRun[recordingKey] ?: cache[row.song.key]
                         val matched = if (cached != null && (cached.video != null ||
-                                (cached.state == "missing" && !recheck && System.currentTimeMillis() - cached.checkedAt < 7 * 86_400_000L))) cached.copy(song = row.song) else {
-                            val local = KaraokeMatcher.match(row.song, SingKingCatalog.library + SingKingCatalog.videos)
-                            val remote = if (local == null) {
-                                Thread.sleep(400)
-                                val query = KaraokeMatcher.queries(row.song).first()
-                                var attempt = YouTubeSearch.fetch(query)
-                                repeat(2) { if (attempt.error != null && !cancelled &&
-                                        attempt.error?.contains("HTTP 429") != true && attempt.error?.contains("HTTP 403") != true) {
-                                    Thread.sleep(2_000); attempt = YouTubeSearch.fetch(query)
-                                } }
-                                if (attempt.error == null && KaraokeMatcher.match(row.song, attempt.videos) == null && !cancelled) {
-                                    Thread.sleep(700)
-                                    val fallback = YouTubeSearch.fetch(KaraokeMatcher.queries(row.song).last())
-                                    if (fallback.error == null) attempt = VideoSearchResult((attempt.videos + fallback.videos).distinctBy { it.id })
-                                    else attempt = fallback
-                                }
-                                attempt
-                            } else VideoSearchResult(listOf(local))
+                                (cached.state == "missing" && (checkedThisRun.containsKey(recordingKey) || !recheck) &&
+                                    System.currentTimeMillis() - cached.checkedAt < 7 * 86_400_000L))) cached.copy(song = row.song) else {
+                            val local = library.match(row.song)
+                            val remote = if (local == null) lookup.search(row.song) { cancelled }
+                                else VideoSearchResult(listOf(local))
+                            if (cancelled) break
                             if (remote.error != null) {
                                 playlist = playlist.copy(songs = playlist.songs.toMutableList().apply {
                                     set(index, row.copy(state = "error", checkedAt = System.currentTimeMillis()))
@@ -157,12 +163,15 @@ internal object SpotifyImporter {
                             SpotifyMatch(row.song, video, if (video == null) "missing" else "matched", System.currentTimeMillis())
                         }
                         cache[row.song.key] = matched
+                        consecutiveErrors = 0
+                        checkedThisRun[recordingKey] = matched
+                        if (matched.video != null && matched.state != "manual") recordings[recordingKey] = matched
                         playlist = playlist.copy(songs = playlist.songs.toMutableList().apply { set(index, matched) })
                         store.put(playlist)
                     }
                 }
                 val all = store.all()
-                if (!cancelled) policy.edit().putInt("policy", 2).apply()
+                if (!cancelled) policy.edit().putInt("policy", MATCH_POLICY).apply()
                 update(if (cancelled) "Paused · ${all.sumOf { it.matched }} karaoke matches saved" else
                     "${all.size} playlists · ${all.sumOf { it.matched }} karaoke matches\n${all.count { it.problem != null }} playlists need attention · ${all.sumOf { p -> p.songs.count { it.state == "error" } }} checks need retry")
             } catch (e: Exception) { update(if (e is java.io.IOException) "Network interrupted. Saved progress is safe; tap Resume to retry."

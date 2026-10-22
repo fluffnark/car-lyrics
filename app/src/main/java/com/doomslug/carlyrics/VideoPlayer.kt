@@ -15,6 +15,9 @@ interface VideoPlayer : SurfaceCallback {
     fun prepare() = Unit
     fun setCompactHeader(enabled: Boolean) = Unit
     fun videoToSave(selected: KaraokeVideo?): KaraokeVideo? = selected
+    fun loadHome(more: Boolean, done: (String?, String?) -> Unit) { done(null, "Connect native Morphe in phone Setup to load Home.") }
+    fun showCurrentVideo(): Boolean = false
+    fun playFrom(video: KaraokeVideo, positionMs: Long) { select(video); if (positionMs > 0) seekTo(positionMs) }
     fun select(video: KaraokeVideo)
     fun pause()
     fun resume()

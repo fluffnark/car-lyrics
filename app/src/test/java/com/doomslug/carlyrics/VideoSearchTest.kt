@@ -152,7 +152,7 @@ class VideoSearchTest {
         context.lifecycleOwner.registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
         manager.push(screen)
         val done = object : OnDoneCallback {}
-        ((manager.top.onGetTemplate() as ListTemplate).singleList!!.items.first() as Row).onClickDelegate!!.sendClick(done)
+        ((manager.top.onGetTemplate() as ListTemplate).singleList!!.items.map { it as Row }.first { it.title.toString() == "Search YouTube" }).onClickDelegate!!.sendClick(done)
         val search = manager.top.onGetTemplate() as SearchTemplate
         assertFalse(search.isShowKeyboardByDefault)
         listOf("Queen", "", "Don't Stop", "Me Now by Queen").forEach {

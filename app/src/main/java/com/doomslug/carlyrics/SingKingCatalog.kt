@@ -13,7 +13,7 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 /** Only video IDs and titles are stored. Video playback remains in YouTube's player. */
-data class KaraokeVideo(val id: String, val title: String) {
+data class KaraokeVideo(val id: String, val title: String, val channel: String = "") {
     companion object { val ID = Regex("[A-Za-z0-9_-]{11}") }
 }
 

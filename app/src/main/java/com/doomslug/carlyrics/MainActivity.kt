@@ -48,14 +48,23 @@ class MainActivity : Activity() {
     private lateinit var phoneScroll: ScrollView
     private lateinit var queuePanel: LinearLayout
     private lateinit var queueToggle: Button
-    private enum class Page { SEARCH, QUEUE, ALBUMS }
+    private enum class Page { SEARCH, QUEUE, ALBUMS, HISTORY, HOME }
     private var page = Page.SEARCH
     private var openedPlaylist: String? = null
     private var playlistQuery = ""
     private var changingSearch = false
+    private lateinit var homeTab: Button
+    private lateinit var homePanel: LinearLayout
+    private val homeChanged: () -> Unit = { if (::homePanel.isInitialized && page == Page.HOME) renderHome() }
     private lateinit var exploreTab: Button
     private lateinit var albumsTab: Button
     private lateinit var albumsPanel: LinearLayout
+    private lateinit var historyPanel: LinearLayout
+    private val history by lazy { PlaybackHistory(this) }
+    private val scrollPositions = linkedMapOf<String, Int>()
+    private var scrollKey = ""
+    private var scrollRestoreSerial = 0
+    private var restoringScroll = false
     private lateinit var connectionLabel: TextView
     private lateinit var nowPlayingBar: LinearLayout
     private lateinit var nowPlayingArt: ImageView
@@ -107,6 +116,9 @@ class MainActivity : Activity() {
         awaitingControls = savedInstanceState?.getBoolean("awaiting_controls") ?: false
         awaitingNative = savedInstanceState?.getBoolean("awaiting_native") ?: false
         requestingCapture = savedInstanceState?.getBoolean("requesting_capture") ?: false
+        savedInstanceState?.getBundle("browse_positions")?.let { positions ->
+            positions.keySet().forEach { scrollPositions[it] = positions.getInt(it) }
+        }
         playlistQuery = savedInstanceState?.getString("playlist_query").orEmpty()
         openedPlaylist = savedInstanceState?.getString("opened_playlist")
         page = Page.entries.getOrElse(savedInstanceState?.getInt("phone_page", 0) ?: 0) { Page.SEARCH }
@@ -133,6 +145,7 @@ class MainActivity : Activity() {
             background = ripple(24)
             setOnClickListener { showConnection() }
         }
+        header.addView(iconButton(R.drawable.ic_history, "History") { showPage(Page.HISTORY) })
         header.addView(connectionLabel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)))
         rootLayout.addView(header)
         rootLayout.addView(space(16))
@@ -155,6 +168,7 @@ class MainActivity : Activity() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     if (changingSearch) return
+                    rememberScroll()
                     if (page == Page.ALBUMS) {
                         playlistQuery = s?.toString().orEmpty(); openedPlaylist = null; renderAlbums()
                     } else {
@@ -178,7 +192,9 @@ class MainActivity : Activity() {
         rootLayout.addView(searchBar)
         rootLayout.addView(space(12))
         val tabs = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        exploreTab = quietButton("Explore") { showPage(Page.SEARCH) }
+        homeTab = quietButton("Home") { hideKeyboard(); showPage(Page.HOME) }
+        tabs.addView(homeTab, LinearLayout.LayoutParams(0, dp(48), 1f))
+        exploreTab = quietButton("Search") { showPage(Page.SEARCH) }
         queueToggle = quietButton("Queue") { showPage(Page.QUEUE) }
         albumsTab = quietButton("Playlists") { showPage(Page.ALBUMS) }
         listOf(exploreTab, queueToggle, albumsTab).forEach {
@@ -189,6 +205,10 @@ class MainActivity : Activity() {
         phoneScroll = ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = false
+            isSaveEnabled = false
+            setOnScrollChangeListener { _, _, y, _, _ ->
+                if (!restoringScroll && scrollKey.isNotEmpty()) scrollPositions[scrollKey] = y
+            }
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -197,7 +217,10 @@ class MainActivity : Activity() {
         queuePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         albumsPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         phoneResults = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(phoneResults); content.addView(queuePanel); content.addView(albumsPanel)
+        historyPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        homePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(homePanel)
+        content.addView(phoneResults); content.addView(queuePanel); content.addView(albumsPanel); content.addView(historyPanel)
         phoneScroll.addView(content)
         rootLayout.addView(phoneScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         nowPlayingBar = LinearLayout(this).apply {
@@ -206,7 +229,7 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(8), dp(4), dp(8))
             background = ripple(12)
             setOnClickListener { hideKeyboard(); showCurrentVideo() }
-            contentDescription = "Return to current video"
+            contentDescription = "Play current video"
         }
         nowPlayingArt = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -215,7 +238,7 @@ class MainActivity : Activity() {
         }
         nowPlayingBar.addView(nowPlayingArt, LinearLayout.LayoutParams(dp(48), dp(30)).apply { marginEnd = dp(12) })
         val nowText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        nowText.addView(text("On car", 11f, mint))
+        nowText.addView(text("Current video", 11f, mint))
         nowPlayingTitle = text("", 14f, ink).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         nowText.addView(nowPlayingTitle)
         nowPlayingBar.addView(nowText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -249,9 +272,9 @@ class MainActivity : Activity() {
     }
 
     private fun showPage(next: Page) {
+        rememberScroll()
         val previousPage = page
         page = next
-        openedPlaylist = null
         if (::searchInput.isInitialized) {
             changingSearch = true
             searchInput.hint = if (page == Page.ALBUMS) "Find playlists" else "Search songs or artists"
@@ -264,14 +287,65 @@ class MainActivity : Activity() {
         phoneResults.visibility = if (page == Page.SEARCH) View.VISIBLE else View.GONE
         queuePanel.visibility = if (page == Page.QUEUE) View.VISIBLE else View.GONE
         albumsPanel.visibility = if (page == Page.ALBUMS) View.VISIBLE else View.GONE
-        listOf(exploreTab to Page.SEARCH, queueToggle to Page.QUEUE, albumsTab to Page.ALBUMS).forEach { (tab, target) ->
+        homePanel.visibility = if (page == Page.HOME) View.VISIBLE else View.GONE
+        historyPanel.visibility = if (page == Page.HISTORY) View.VISIBLE else View.GONE
+        listOf(homeTab to Page.HOME, exploreTab to Page.SEARCH, queueToggle to Page.QUEUE, albumsTab to Page.ALBUMS).forEach { (tab, target) ->
             tab.setTextColor(if (page == target) mint else muted)
             tab.typeface = Typeface.create("sans-serif", if (page == target) Typeface.BOLD else Typeface.NORMAL)
         }
         updatePhoneQueueStatus()
         if (page == Page.QUEUE) renderQueue()
         if (page == Page.ALBUMS) renderAlbums()
-        phoneScroll.smoothScrollTo(0, 0)
+        if (page == Page.HOME) { renderHome(); MorpheHomeFeed.load(this) }
+        if (page == Page.HISTORY) renderHistory()
+        restoreScroll()
+    }
+
+    private fun positionKey(): String = when (page) {
+        Page.SEARCH -> "search:${searchSession.query}:${searchSession.options}"
+        Page.QUEUE -> "queue"
+        Page.ALBUMS -> openedPlaylist?.let { "playlist:$it" } ?: "playlists:$playlistQuery"
+        Page.HISTORY -> "history"
+        Page.HOME -> "home"
+    }
+    private fun rememberScroll() {
+        if (::phoneScroll.isInitialized && !restoringScroll && scrollKey.isNotEmpty()) scrollPositions[scrollKey] = phoneScroll.scrollY
+    }
+    private fun restoreScroll() {
+        if (!::phoneScroll.isInitialized) return
+        val key = positionKey()
+        scrollKey = key
+        restoringScroll = true
+        val serial = ++scrollRestoreSerial
+        phoneScroll.post {
+            if (!isDestroyed && scrollRestoreSerial == serial) {
+                phoneScroll.scrollTo(0, scrollPositions[key] ?: 0)
+                restoringScroll = false
+            }
+        }
+    }
+    private fun renderHome() {
+        rememberScroll()
+        homePanel.removeAllViews(); thumbnailViews.clear()
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(text("For you", 23f, ink, true), LinearLayout.LayoutParams(0, dp(60), 1f))
+        heading.addView(quietButton("Refresh") { MorpheHomeFeed.load(this, force = true) }.apply { isEnabled = !MorpheHomeFeed.loading })
+        homePanel.addView(heading)
+        if (MorpheHomeFeed.cards.isEmpty() && !MorpheHomeFeed.loading && MorpheHomeFeed.error == null)
+            homePanel.addView(text("Recommendations from your Morphe account.", 14f, muted))
+        MorpheHomeFeed.cards.forEach { card ->
+            if (card.video != null) homePanel.addView(songRow(card.video, sourceTitle = card.title))
+            else homePanel.addView(text(card.title + "\n" + card.channel + " · Link unavailable", 15f, muted).apply { setPadding(dp(4), dp(14), dp(4), dp(14)) })
+        }
+        MorpheHomeFeed.error?.let { message ->
+            homePanel.addView(text(message, 14f, muted).apply { setPadding(dp(4), dp(16), dp(4), dp(8)) })
+            homePanel.addView(quietButton("Retry") { MorpheHomeFeed.load(this, force = true) })
+        }
+        if (MorpheHomeFeed.loading) homePanel.addView(text("Loading your recommendations…", 14f, muted).apply { setPadding(dp(4), dp(20), 0, dp(12)) })
+        else if (MorpheHomeFeed.cards.isNotEmpty()) homePanel.addView(quietButton("More recommendations") { MorpheHomeFeed.load(this, more = true) })
+        val videos = MorpheHomeFeed.cards.mapNotNull { it.video }
+        Thumbnails.request(videos) { if (!isDestroyed) thumbnailViews.forEach { (id, views) -> Thumbnails.get(id)?.let { bitmap -> views.forEach { it.setImageBitmap(bitmap) } } } }
+        restoreScroll()
     }
 
     private fun showFilters() {
@@ -346,9 +420,12 @@ class MainActivity : Activity() {
     private fun updateNowPlaying() {
         if (!::nowPlayingBar.isInitialized) return
         val video = CarPlaybackLink.currentVideo?.invoke()
+            ?: MorpheMediaAccess.videoToSave(MorpheMediaAccess.controller(this)?.metadata, history.all().firstOrNull()?.video)
+            ?: history.all().firstOrNull()?.video
         nowPlayingBar.visibility = if (video == null) View.GONE else View.VISIBLE
         val title = video?.let { displayTitle(it.title) }.orEmpty()
         if (nowPlayingTitle.text.toString() != title) nowPlayingTitle.text = title
+        if (video != null && Thumbnails.get(video.id) == null) Thumbnails.request(listOf(video)) { if (!isDestroyed) updateNowPlaying() }
         val bitmap = video?.let { Thumbnails.get(it.id) }
         if (bitmap != null && nowPlayingArt.tag !== bitmap) {
             nowPlayingArt.setImageBitmap(bitmap)
@@ -398,10 +475,19 @@ class MainActivity : Activity() {
         }
     }
     private fun showCurrentVideo() {
-        val shown = CarPlaybackLink.showPlayer?.invoke() == true
-        if (!MorpheNativeDisplay.enabled(this)) openMorphe()
-        else Toast.makeText(this, if (shown) "Current video selected on Android Auto"
-            else "Open Car Lyrics in Android Auto and select a song first", Toast.LENGTH_LONG).show()
+        rememberScroll()
+        if (CarPlaybackLink.showPlayer?.invoke() == true) return
+        val controller = if (MorpheHomeFeed.phoneHostActive) null else MorpheMediaAccess.controller(this)
+        val current = MorpheMediaAccess.videoToSave(controller?.metadata, history.all().firstOrNull()?.video)
+        if (current != null) {
+            history.checkpoint(current, MorpheMediaAccess.timeline(this))
+            controller?.transportControls?.play()
+            if (runCatching { controller?.sessionActivity?.let { it.send(); true } ?: false }.getOrDefault(false)) return
+        }
+        val entry = history.all().firstOrNull()
+        val video = current ?: entry?.video
+        if (video == null) { Toast.makeText(this, "Choose a video first, or open Morphe Home.", Toast.LENGTH_LONG).show(); return }
+        launchVideo(video, if (current != null) MorpheMediaAccess.timeline(this)?.positionMs ?: 0 else entry?.positionMs ?: 0)
     }
     private fun openShizuku() {
         val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
@@ -489,6 +575,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         mainHandler.post(refreshConnection)
+        MorpheHomeFeed.observe(homeChanged)
         MorpheCaptureGrant.observe(captureChanged)
         updateMorpheStatus()
         queuePreferences.registerOnSharedPreferenceChangeListener(queueChanged)
@@ -498,6 +585,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (::albumsPanel.isInitialized && page == Page.ALBUMS) renderAlbums()
+        if (::historyPanel.isInitialized && page == Page.HISTORY) renderHistory()
+        restoreScroll()
         updateMorpheStatus()
         if (awaitingNative && MorpheNativeDisplay.running()) {
             awaitingNative = false
@@ -513,13 +602,17 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        rememberScroll()
         mainHandler.removeCallbacks(refreshConnection)
         queuePreferences.unregisterOnSharedPreferenceChangeListener(queueChanged)
+        MorpheHomeFeed.unobserve(homeChanged)
         MorpheCaptureGrant.removeObserver(captureChanged)
         super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        rememberScroll()
+        outState.putBundle("browse_positions", Bundle().apply { scrollPositions.entries.toList().takeLast(100).forEach { (key, y) -> putInt(key, y) } })
         outState.putBoolean("karaoke_only", searchSession.options.karaokeOnly)
         outState.putBoolean("library_only", searchSession.options.libraryOnly)
         outState.putString("preferred_provider", searchSession.options.provider)
@@ -574,6 +667,7 @@ class MainActivity : Activity() {
 
     private fun renderPhoneResults() {
         if (!::phoneResults.isInitialized) return
+        if (page == Page.SEARCH) rememberScroll()
         queueBadges.clear()
         if (page == Page.SEARCH) thumbnailViews.clear()
         phoneResults.removeAllViews()
@@ -586,6 +680,7 @@ class MainActivity : Activity() {
         if (source.isEmpty() && !searchSession.loading) phoneResults.addView(text(
             if (searchSession.query.isBlank()) "Find a song to get started." else "No songs found. Try another search.", 15f, muted).apply { setPadding(dp(4), dp(28), 0, 0) })
         source.forEach { video -> phoneResults.addView(songRow(video)) }
+        if (page == Page.SEARCH) restoreScroll()
         Thumbnails.request(source) { if (!isDestroyed) thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let { bitmap -> view.forEach { it.setImageBitmap(bitmap) } } } }
     }
 
@@ -594,7 +689,7 @@ class MainActivity : Activity() {
         .replace(Regex("\\s*\\|\\s*Karaoke Version\\s*\\|", RegexOption.IGNORE_CASE), " ·")
         .trim()
 
-    private fun songRow(video: KaraokeVideo, queueIndex: Int? = null, album: KaraokePlaylist? = null): View {
+    private fun songRow(video: KaraokeVideo, queueIndex: Int? = null, album: KaraokePlaylist? = null, sourceTitle: String? = null): View {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(10), 0, dp(10))
@@ -608,14 +703,15 @@ class MainActivity : Activity() {
             background = panel(Color.rgb(29, 40, 45), 8)
             clipToOutline = true
             setImageBitmap(Thumbnails.get(video.id))
-            if ((page == Page.SEARCH && queueIndex == null) || (page == Page.QUEUE && queueIndex != null) || page == Page.ALBUMS)
+            if ((page == Page.SEARCH && queueIndex == null) || (page == Page.QUEUE && queueIndex != null) || page == Page.ALBUMS || page == Page.HISTORY || page == Page.HOME)
                 thumbnailViews.getOrPut(video.id) { mutableListOf() }.add(this)
         }, LinearLayout.LayoutParams(dp(88), dp(52)).apply { marginEnd = dp(12) })
         val title = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        title.addView(text(displayTitle(video.title), 15f, ink).apply {
+        title.addView(text(displayTitle(sourceTitle ?: video.title), 15f, ink).apply {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 2; ellipsize = TextUtils.TruncateAt.END
         })
+        if (page == Page.HOME && video.channel.isNotBlank()) title.addView(text(video.channel, 12f, muted).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         if (queueIndex == null) {
             title.addView(text("In queue", 11f, mint).apply {
                 visibility = if (queueStore.all().any { it.id == video.id }) View.VISIBLE else View.GONE
@@ -655,6 +751,7 @@ class MainActivity : Activity() {
                 if (index < album.videos.lastIndex) menu.add("Move down").setOnMenuItemClickListener { playlistStore.move(album.name, video.id, 1); renderAlbums(); true }
                 menu.add("Remove from playlist").setOnMenuItemClickListener { playlistStore.remove(album.name, video.id); renderAlbums(); true }
             }
+            if (page == Page.HISTORY) menu.add("Remove from history").setOnMenuItemClickListener { history.remove(video.id); renderHistory(); true }
             if (queueIndex != null) {
                 if (queueIndex > 0) menu.add("Move up").setOnMenuItemClickListener { queueStore.move(video.id, -1); true }
                 if (queueIndex < queueStore.all().lastIndex) menu.add("Move down").setOnMenuItemClickListener { queueStore.move(video.id, 1); true }
@@ -664,14 +761,44 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun playNow(video: KaraokeVideo) {
-        hideKeyboard()
+    private fun playNow(video: KaraokeVideo) = launchVideo(video, 0)
+
+    private fun launchVideo(video: KaraokeVideo, positionMs: Long) {
+        rememberScroll(); hideKeyboard()
         queueStore.add(video)
-        if (CarPlaybackLink.playVideo?.invoke(video) == true) return
-        runCatching {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.id}"))
+        if (positionMs == 0L && CarPlaybackLink.playVideo?.invoke(video) == true) return
+        if (positionMs > 0 && CarPlaybackLink.resumeVideo?.invoke(video, positionMs) == true) return
+        history.opened(video, positionMs)
+        MorpheHomeFeed.releasePhoneHost { runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.id}&t=${positionMs.coerceAtLeast(0) / 1000}s"))
                 .setPackage(MorpheMediaAccess.PACKAGE))
-        }.onFailure { Toast.makeText(this, "Could not open Morphe. Check setup above.", Toast.LENGTH_LONG).show() }
+        }.onFailure { Toast.makeText(this, "Could not open Morphe. Check setup above.", Toast.LENGTH_LONG).show() } }
+    }
+
+    private fun renderHistory() {
+        rememberScroll()
+        historyPanel.removeAllViews(); thumbnailViews.clear()
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(text("History", 23f, ink, true), LinearLayout.LayoutParams(0, dp(60), 1f))
+        heading.addView(iconButton(R.drawable.ic_more, "History options") { anchor ->
+            PopupMenu(this, anchor).apply {
+                menu.add("Clear history").setOnMenuItemClickListener {
+                    showDialog(AlertDialog.Builder(this@MainActivity).setTitle("Clear local history?")
+                        .setNegativeButton("Cancel", null).setPositiveButton("Clear") { _, _ -> history.clear(); renderHistory(); updateNowPlaying() }); true
+                }; show()
+            }
+        })
+        historyPanel.addView(heading)
+        val entries = history.all()
+        if (entries.isEmpty()) historyPanel.addView(text("Videos you play appear here.", 15f, muted))
+        entries.forEach { entry ->
+            val row = songRow(entry.video)
+            row.setOnClickListener { launchVideo(entry.video, entry.positionMs.takeIf { entry.durationMs == 0L || it < entry.durationMs - 3_000 } ?: 0) }
+            historyPanel.addView(row)
+        }
+        restoreScroll()
+        Thumbnails.request(entries.map { it.video }) { if (!isDestroyed && page == Page.HISTORY)
+            thumbnailViews.forEach { (id, views) -> Thumbnails.get(id)?.let { bitmap -> views.forEach { it.setImageBitmap(bitmap) } } } }
     }
 
     private fun chooseAlbum(video: KaraokeVideo) {
@@ -713,19 +840,19 @@ class MainActivity : Activity() {
 
     private fun renderQueue() {
         if (!::queuePanel.isInitialized || page != Page.QUEUE) return
-        val previousScroll = phoneScroll.scrollY
+        rememberScroll()
         queuePanel.removeAllViews()
         thumbnailViews.clear()
         val videos = queueStore.all()
         if (videos.isEmpty()) queuePanel.addView(text("Your queue is empty. Add songs from ⋮.", 15f, muted).apply { setPadding(dp(4), dp(28), 0, 0) })
         videos.forEachIndexed { index, video -> queuePanel.addView(songRow(video, index)) }
         Thumbnails.request(videos) { if (!isDestroyed) thumbnailViews.forEach { (id, view) -> Thumbnails.get(id)?.let { bitmap -> view.forEach { it.setImageBitmap(bitmap) } } } }
-        phoneScroll.post { phoneScroll.scrollTo(0, previousScroll) }
+        restoreScroll()
     }
 
     private fun closePlaylist(): Boolean {
         if (page != Page.ALBUMS || openedPlaylist == null) return false
-        openedPlaylist = null; renderAlbums(); phoneScroll.scrollTo(0, 0)
+        rememberScroll(); openedPlaylist = null; renderAlbums()
         return true
     }
 
@@ -748,10 +875,11 @@ class MainActivity : Activity() {
     }
 
     private fun renderAlbums() {
+        rememberScroll()
         albumsPanel.removeAllViews()
         thumbnailViews.clear()
         val album = openedPlaylist?.let { name -> playlistStore.all().firstOrNull { it.name == name } }
-        if (album != null) { renderPlaylist(album); return }
+        if (album != null) { renderPlaylist(album); restoreScroll(); return }
         openedPlaylist = null
         val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         heading.addView(text("Your playlists", 22f, ink, true), LinearLayout.LayoutParams(0, dp(60), 1f))
@@ -773,7 +901,7 @@ class MainActivity : Activity() {
             albumsPanel.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(10), 0, dp(10)); background = ripple(12)
-                setOnClickListener { openedPlaylist = p.name; hideKeyboard(); renderAlbums(); phoneScroll.scrollTo(0, 0) }
+                setOnClickListener { rememberScroll(); openedPlaylist = p.name; hideKeyboard(); renderAlbums() }
                 addView(playlistArt(p), LinearLayout.LayoutParams(dp(64), dp(64)).apply { marginEnd = dp(14) })
                 val title = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
                 title.addView(text(p.name.substringBefore(" · Spotify [").trim(), 16f, ink, true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
@@ -782,6 +910,7 @@ class MainActivity : Activity() {
                 addView(text("›", 24f, muted))
             })
         }
+        restoreScroll()
         requestPlaylistArt(albums.flatMap { it.videos.take(1) })
     }
 
@@ -798,7 +927,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderPlaylist(album: KaraokePlaylist) {
-        albumsPanel.addView(quietButton("‹  Your playlists") { openedPlaylist = null; renderAlbums(); phoneScroll.scrollTo(0, 0) })
+        albumsPanel.addView(quietButton("‹  Your playlists") { rememberScroll(); openedPlaylist = null; renderAlbums() })
         val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(16)) }
         heading.addView(playlistArt(album), LinearLayout.LayoutParams(dp(88), dp(88)).apply { marginEnd = dp(16) })
         val title = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

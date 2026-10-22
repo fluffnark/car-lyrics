@@ -102,6 +102,30 @@ public final class NativeMorpheService extends INativeMorphe.Stub {
         });
     }
 
+    @Override public void home() {
+        run(() -> {
+            if (display == null) throw new IllegalStateException("No native display");
+            command("/system/bin/am", "start", "--display", Integer.toString(display.getDisplay().getDisplayId()),
+                "-a", "android.intent.action.VIEW", "-n",
+                "app.morphe.android.youtube/com.google.android.apps.youtube.app.application.Shell_UrlActivity",
+                "-f", "0x10000000", "-d", "https://www.youtube.com/");
+            return null;
+        });
+    }
+
+    private void command(String... args) throws Exception {
+        Process process = new ProcessBuilder(args).redirectErrorStream(true).start();
+        if (!process.waitFor(5, TimeUnit.SECONDS)) { process.destroy(); throw new IllegalStateException("Morphe command timed out"); }
+        if (process.exitValue() != 0) throw new IllegalStateException("Morphe command failed");
+    }
+
+    @Override public String recommendations(boolean more) {
+        return run(() -> {
+            if (display == null) throw new IllegalStateException("No native display");
+            return MorpheHomeReader.read(display.getDisplay().getDisplayId(), more);
+        });
+    }
+
     private void closeDisplay() {
         if (lifetime != null) { lifetime.unlinkToDeath(death, 0); lifetime = null; }
         if (display != null) { display.release(); display = null; }

@@ -28,6 +28,24 @@ object YouTubeSearch : VideoSearch {
         worker.execute { val result = fetch(clean); main.post { done(result) } }
     }
 
+    /** YouTube can show an experimental Home title while its player uses the canonical title. */
+    internal fun canonicalVideo(video: KaraokeVideo, done: (KaraokeVideo?) -> Unit) {
+        worker.execute {
+            val verified = runCatching {
+                val connection = URL("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${video.id}&format=json")
+                    .openConnection() as HttpURLConnection
+                connection.connectTimeout = 8_000; connection.readTimeout = 8_000
+                try {
+                    val metadata = JSONObject(connection.inputStream.bufferedReader().use { it.readText().take(32_000) })
+                    val title = metadata.getString("title").trim()
+                    val channel = metadata.getString("author_name").trim()
+                    if (title.isBlank() || channel.isBlank()) null else video.copy(title = title, channel = channel)
+                } finally { connection.disconnect() }
+            }.getOrNull()
+            main.post { done(verified) }
+        }
+    }
+
     /** Blocking worker-only search, also used by the resumable playlist importer. */
     internal fun fetch(clean: String): VideoSearchResult = runCatching {
                 val encoded = URLEncoder.encode(clean, "UTF-8")
@@ -91,7 +109,9 @@ internal object YouTubeSearchParser {
                         val text = title?.optString("simpleText").orEmpty().ifBlank {
                             (0 until (runs?.length() ?: 0)).joinToString("") { runs!!.optJSONObject(it)?.optString("text").orEmpty() }
                         }.trim()
-                        if (KaraokeVideo.ID.matches(id) && text.isNotBlank()) videos.putIfAbsent(id, KaraokeVideo(id, text))
+                        if (KaraokeVideo.ID.matches(id) && text.isNotBlank()) videos.putIfAbsent(id, KaraokeVideo(id, text,
+                            (renderer.optJSONObject("ownerText") ?: renderer.optJSONObject("longBylineText") ?: renderer.optJSONObject("shortBylineText"))
+                                ?.optJSONArray("runs")?.optJSONObject(0)?.optString("text").orEmpty()))
                     }
                     value.keys().forEach { visit(value.opt(it), depth + 1) }
                 }

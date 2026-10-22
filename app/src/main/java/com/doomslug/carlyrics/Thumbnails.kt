@@ -21,6 +21,16 @@ object Thumbnails {
 
     fun get(id: String): Bitmap? = cache.get(id)
 
+    /** Publish a newly loaded list once its images settle, avoiding redraws during rotary browsing. */
+    fun requestBatch(videos: List<KaraokeVideo>, done: () -> Unit) {
+        var delivered = false
+        fun check() {
+            if (!delivered && videos.none { it.id in pending }) { delivered = true; done() }
+        }
+        request(videos, ::check)
+        check()
+    }
+
     fun request(videos: List<KaraokeVideo>, changed: () -> Unit) {
         videos.forEach { video ->
             if (cache.get(video.id) != null || video.id in unavailable) return@forEach

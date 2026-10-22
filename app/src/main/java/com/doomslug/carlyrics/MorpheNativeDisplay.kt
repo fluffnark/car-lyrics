@@ -29,6 +29,8 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
     private var bound = false
     private var closed = false
     private var pending: Pair<KaraokeVideo, Long>? = null
+    private var pendingHome = false
+    private var homeRequested = false
     private var ready = false
     private var initializing = false
     private var failure: String? = null
@@ -66,7 +68,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
             if (closed || attempt != epoch || connection !== this || binder == null) return
             remote = INativeMorphe.Stub.asInterface(binder)
             main.removeCallbacks(bindTimeout)
-            if (pending != null) initializeDisplay()
+            if (pending != null || pendingHome) initializeDisplay()
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             if (!closed && attempt == epoch && connection === this) disconnected()
@@ -101,6 +103,8 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
     fun play(video: KaraokeVideo, positionMs: Long = 0, recover: Boolean = false) {
         if (closed) return
         requestSerial++
+        pendingHome = false
+        homeRequested = false
         pending = video to positionMs
         failure = null
         if (!authorized()) { changed(); return }
@@ -110,6 +114,40 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         if (remote != null && !initializing) { initializeDisplay(); return }
         prepare()
         changed()
+    }
+    fun home() {
+        if (closed) return
+        requestSerial++
+        homeRequested = true
+        pending = null
+        pendingHome = true
+        failure = null
+        if (!authorized()) { changed(); return }
+        if (ready) dispatchPending()
+        else if (remote != null && !initializing) initializeDisplay()
+        else prepare()
+    }
+    fun recommendations(more: Boolean, done: (String?, String?) -> Unit) {
+        if (!authorized()) { done(null, "Start Shizuku and allow Car Lyrics in Setup."); return }
+        if (!homeRequested || !more) home()
+        fun read(attempt: Int, emptyRetries: Int = 0) {
+            if (closed) { done(null, "Home connection closed."); return }
+            val service = remote
+            if (!ready || service == null) {
+                if (attempt >= 48) done(null, detail ?: "Morphe Home did not start. Retry.")
+                else main.postDelayed({ read(attempt + 1) }, 250)
+                return
+            }
+            worker.execute {
+                val result = runCatching { service.recommendations(more && emptyRetries == 0) }
+                main.post { result.onSuccess {
+                    // A cold Morphe launch can expose its empty RecyclerView before the network feed arrives.
+                    if (it.trim() == "[]" && emptyRetries < 3) main.postDelayed({ read(attempt, emptyRetries + 1) }, 600)
+                    else done(it, null)
+                }.onFailure { done(null, "Could not read Morphe Home. Retry or check Morphe setup.") } }
+            }
+        }
+        read(0)
     }
     fun prepare() {
         if (closed || !authorized() || remote != null) return
@@ -163,6 +201,12 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         }
     }
     private fun dispatchPending() {
+        if (pendingHome) {
+            val service = remote ?: return
+            pendingHome = false
+            worker.execute { runCatching { service.home() }.onFailure { error -> main.post { if (!closed) failed(error) } } }
+            return
+        }
         val request = pending ?: return
         val service = remote ?: return
         pending = null
@@ -188,8 +232,8 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
         initializing = false
         changed()
     }
-    fun close() {
-        if (closed) return
+    fun close(done: () -> Unit = {}) {
+        if (closed) { done(); return }
         closed = true
         clearBinding(removeService = true)
         Shizuku.removeBinderDeadListener(binderDead)
@@ -201,6 +245,7 @@ internal class MorpheNativeDisplay(private val context: Context, private val cha
             main.post {
                 renderer?.close()
                 renderer = null
+                done()
             }
         }
         worker.shutdown()

@@ -41,14 +41,14 @@ class CarLyricsScreen private constructor(
     constructor(
         context: CarContext,
         catalog: VideoCatalog = SingKingCatalog,
-        player: VideoPlayer = MorpheScreenShare(context),
+        player: VideoPlayer = MorpheHomeFeed.playerForCar(context),
         saved: SavedVideos = SavedVideos(context),
         remoteSearch: VideoSearch = YouTubeSearch,
         fullscreenHost: Boolean = BuildConfig.FULLSCREEN_HOST,
     ) : this(context, catalog, CarPlaybackSession(player), saved, remoteSearch, fullscreenHost)
 
-    private enum class Source { RECENT, SAVED }
-    private enum class Mode { BROWSE, SEARCH, COLLECTIONS, QUEUE, PLAYLISTS, PLAYLIST, PLAYER, SEEK }
+    private enum class Source { RECENT, SAVED, HISTORY }
+    private enum class Mode { BROWSE, SEARCH, COLLECTIONS, QUEUE, PLAYLISTS, PLAYLIST, PLAYER, SEEK, HOME }
     private val player get() = session.player
     private var queue: List<KaraokeVideo>
         get() = session.queue
@@ -63,9 +63,12 @@ class CarLyricsScreen private constructor(
     private val manager get() = carContext.getCarService(ScreenManager::class.java)
     private val playlists = PlaylistStore(context)
     private val queueStore = QueueStore(context)
+    private val history = PlaybackHistory(context)
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private var editingSearch = false
     private var playlistPage = initialPlaylistPage
+    private var homePage = 0
+    private val homeChanged: () -> Unit = { if (mode == Mode.HOME) invalidate() }
     private val queuePreferences = context.getSharedPreferences("karaoke_queue", 0)
     private val playlistPreferences = context.getSharedPreferences("karaoke_playlists", 0)
     private val queueChanged = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -98,13 +101,19 @@ class CarLyricsScreen private constructor(
             playlistPreferences.registerOnSharedPreferenceChangeListener(playlistsChanged)
             SpotifyImporter.observe(importFinished)
             CarPlaybackLink.playVideo = { video ->
+                val target = session.active ?: this
                 val queued = queueStore.all()
                 val index = queued.indexOfFirst { it.id == video.id }
-                if (index >= 0) select(queued, index, QUEUE_SOURCE)
-                else select(listOf(video), 0)
+                if (index >= 0) target.select(queued, index, QUEUE_SOURCE)
+                else target.select(listOf(video), 0)
                 true
             }
-            CarPlaybackLink.currentVideo = { player.videoToSave(queue.getOrNull(selected)) ?: queue.getOrNull(selected) }
+            CarPlaybackLink.resumeVideo = { video, position ->
+                (session.active ?: this).select(listOf(video), 0, positionMs = position)
+                true
+            }
+            CarPlaybackLink.loadHome = player::loadHome
+            CarPlaybackLink.currentVideo = { currentVideo() }
             CarPlaybackLink.playNext = { video ->
                 val current = CarPlaybackLink.currentVideo?.invoke()
                 queueStore.playNext(video, current)
@@ -118,18 +127,24 @@ class CarLyricsScreen private constructor(
                 session.hasVideo
             }
             CarPlaybackLink.showPlayer = {
-                if (session.hasVideo) {
-                    returnToPlayer()
+                val current = currentVideo()
+                if (current != null) {
+                    if (!session.hasVideo) {
+                        queue = listOf(current); selected = 0
+                        if (!player.showCurrentVideo()) player.playFrom(current, history.all().firstOrNull { it.video.id == current.id }?.positionMs ?: 0)
+                    } else player.showCurrentVideo()
+                    player.resume()
+                    (session.active ?: this).returnToPlayer()
                     runCatching { carContext.startCarApp(android.content.Intent(carContext, CarLyricsService::class.java)) }
                 }
-                session.hasVideo
+                current != null
             }
         }
-        if (mode == Mode.PLAYER) marker = PLAYER_MARKER
     }
 
     override fun onStart(owner: LifecycleOwner) {
         session.active = this
+        if (mode == Mode.HOME) MorpheHomeFeed.observe(homeChanged)
         if (!session.surfaceRegistered) {
             carContext.getCarService(AppManager::class.java).setSurfaceCallback(player)
             session.surfaceRegistered = true
@@ -144,6 +159,7 @@ class CarLyricsScreen private constructor(
 
     override fun onStop(owner: LifecycleOwner) {
         // Menus and another AA app do not end or reset the current playback session.
+        MorpheHomeFeed.unobserve(homeChanged)
         if (session.active === this) session.active = null
     }
 
@@ -161,6 +177,8 @@ class CarLyricsScreen private constructor(
             queuePreferences.unregisterOnSharedPreferenceChangeListener(queueChanged)
             playlistPreferences.unregisterOnSharedPreferenceChangeListener(playlistsChanged)
             SpotifyImporter.unobserve(importFinished)
+            CarPlaybackLink.loadHome = null
+            CarPlaybackLink.resumeVideo = null
             CarPlaybackLink.currentVideo = null
             CarPlaybackLink.playNext = null
             CarPlaybackLink.repair = null
@@ -182,28 +200,31 @@ class CarLyricsScreen private constructor(
         Mode.PLAYLIST -> playlistTemplate()
         Mode.PLAYER -> playerTemplate()
         Mode.SEEK -> seekTemplate()
-        }
-        // A Back operation is recognized only when the host receives the root's
-        // old template ID. Do not pop and push within the same callback: that
-        // skips the Back template and leaves the host's task quota unchanged.
-        if (ownsSession) session.afterRoot?.let { next ->
-            session.afterRoot = null
-            main.post { if (manager.top === this && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) next() }
+        Mode.HOME -> homeTemplate()
         }
         return template
     }
 
     private fun browseTemplate(): Template {
+        if (source == Source.HISTORY) return historyTemplate()
         val videos = currentVideos()
         val rows = mutableListOf<Row>()
         fun menu(title: String, detail: String, click: () -> Unit) {
             rows += Row.Builder().setTitle(title).addText(detail).setOnClickListener(click).build()
+        }
+        if (activeCollection == null && source == Source.RECENT) {
+            menu("Home", "Morphe recommendations • your signed-in account") {
+                open(Mode.HOME)
+                MorpheHomeFeed.load(carContext)
+            }
+            if (currentVideo() != null) menu("Play current video", "Return to the current video") { returnToPlayer(resume = true) }
         }
         menu("Search YouTube", "Say a song or artist • all providers") { openSearch() }
         if (activeCollection == null && source == Source.RECENT) {
             menu("Queue", "${queueStore.all().size} songs • added from your phone") { open(Mode.QUEUE) }
             menu("Playlists", "Your saved karaoke albums") { open(Mode.PLAYLISTS) }
             menu("Genres & albums", "Browse curated Sing King collections") { open(Mode.COLLECTIONS) }
+            menu("History", "Recently played videos") { open(Mode.BROWSE, source = Source.HISTORY) }
             menu("Favorites", "Your saved karaoke videos") { open(Mode.BROWSE, source = Source.SAVED) }
         }
         if (session.hasVideo && activeCollection == null && source == Source.RECENT) {
@@ -218,6 +239,7 @@ class CarLyricsScreen private constructor(
         if (videos.isEmpty()) {
             rows += Row.Builder().setTitle(when {
                 source == Source.SAVED -> "No saved songs yet"
+                source == Source.HISTORY -> "No history yet"
                 catalog.loading -> "Loading Sing King videos…"
                 catalog.error != null -> catalog.error!!
                 else -> "No recent videos available"
@@ -230,9 +252,10 @@ class CarLyricsScreen private constructor(
             // knob scroll repeatedly rebuilt the list and could thrash the cache.
             visible.forEachIndexed { index, video ->
                 rows += Row.Builder().setTitle(video.title.take(72))
-                    .addText(if (source == Source.SAVED) "Saved karaoke" else "Sing King • Karaoke")
+                    .addText(when (source) { Source.SAVED -> "Saved karaoke"; Source.HISTORY -> "Recently played"; else -> "Sing King • Karaoke" })
                     .setImage(icon(R.drawable.ic_video), Row.IMAGE_TYPE_SMALL)
-                    .setOnClickListener { select(videos, index) }.build()
+                    .setOnClickListener { select(videos, index, positionMs = if (source == Source.HISTORY)
+                        history.all().firstOrNull { it.video.id == video.id }?.let { if (it.durationMs > 0 && it.positionMs >= it.durationMs - 3_000) 0 else it.positionMs } ?: 0 else 0) }.build()
             }
             if (visible.size < videos.size && remaining > 0)
                 menu("Find more songs", "Search the complete library") { openSearch() }
@@ -240,8 +263,27 @@ class CarLyricsScreen private constructor(
         val list = ItemList.Builder()
         rows.take(contentLimit()).forEach(list::addItem)
         return ListTemplate.Builder()
-            .setHeader(header(activeCollection?.title ?: if (source == Source.RECENT) "Sing King • Recent" else "Favorites").build())
+            .setHeader(header(activeCollection?.title ?: if (source == Source.RECENT) "Sing King • Recent" else if (source == Source.HISTORY) "History" else "Favorites").build())
             .setSingleList(list.build()).build()
+    }
+
+    private fun historyTemplate(): Template {
+        val entries = history.all()
+        val size = (contentLimit() - 2).coerceIn(1, 20)
+        playlistPage = playlistPage.coerceAtMost((entries.size - 1).coerceAtLeast(0) / size)
+        val list = ItemList.Builder()
+        entries.drop(playlistPage * size).take(size).forEach { entry ->
+            list.addItem(Row.Builder().setTitle(entry.video.title.take(100)).addText("Recently played")
+                .setImage(icon(R.drawable.ic_history), Row.IMAGE_TYPE_SMALL).setOnClickListener {
+                    select(entries.map { it.video }, entries.indexOf(entry), positionMs =
+                        if (entry.durationMs > 0 && entry.positionMs >= entry.durationMs - 3_000) 0 else entry.positionMs)
+                }.build())
+        }
+        if (entries.isEmpty()) list.addItem(Row.Builder().setTitle("No history yet").addText("Videos you play appear here").build())
+        if (playlistPage > 0) list.addItem(Row.Builder().setTitle("Previous page").setOnClickListener { changePlaylistPage(playlistPage - 1) }.build())
+        if ((playlistPage + 1) * size < entries.size) list.addItem(Row.Builder().setTitle("More history")
+            .setOnClickListener { changePlaylistPage(playlistPage + 1) }.build())
+        return ListTemplate.Builder().setHeader(header(pageTitle("History", entries.size, size)).build()).setSingleList(list.build()).build()
     }
 
     private fun searchItems(): ItemList {
@@ -276,9 +318,10 @@ class CarLyricsScreen private constructor(
         }).setSearchHint("Say a song, artist, or provider")
             .setShowKeyboardByDefault(false)
             .setHeaderAction(Action.BACK)
-        // Do not echo partial text through setInitialSearchText. Results stay in
-        // SearchTemplate, whose content changes are documented as refreshes.
-        if (session.hasVideo) builder.setActionStrip(ActionStrip.Builder().addAction(nowPlayingAction()).build())
+        // Restore only the committed query, never interim speech. Keeping this
+        // Screen below playback also keeps the host's input/focus state.
+        if (!editingSearch && search.query.isNotBlank()) builder.setInitialSearchText(search.query)
+        if (currentVideo() != null) builder.setActionStrip(ActionStrip.Builder().addAction(nowPlayingAction()).build())
         if (search.loading && search.videos.isEmpty()) builder.setLoading(true)
         else builder.setItemList(searchItems())
         return builder.build()
@@ -355,7 +398,7 @@ class CarLyricsScreen private constructor(
     }
 
     private fun playerTemplate(): Template {
-        val current = queue.getOrNull(selected)
+        val current = currentVideo()
         val state = player.statusDetail ?: when (playback) {
             PlaybackStatus.IDLE -> "Ready"
             PlaybackStatus.LOADING -> "Loading video…"
@@ -467,16 +510,21 @@ class CarLyricsScreen private constructor(
             val byId = SingKingCatalog.library.associateBy { it.id }
             return activeCollection!!.ids.mapNotNull { byId[it] }
         }
-        return if (source == Source.RECENT) catalog.videos else saved.all()
+        return when (source) {
+            Source.RECENT -> catalog.videos
+            Source.SAVED -> saved.all()
+            Source.HISTORY -> history.all().map { it.video }
+        }
     }
 
     private fun openSearch() {
         if (mode == Mode.SEARCH && manager.top === this) return
-        if (manager.top === session.owner) open(Mode.SEARCH)
-        else {
-            session.afterRoot = { (session.owner as CarLyricsScreen).open(Mode.SEARCH) }
-            manager.popToRoot()
-        }
+        // Keep the browsing/search Screen instance below playback. Popping only
+        // the player lets the host restore that screen's own scroll and focus.
+        val top = manager.top as? CarLyricsScreen
+        if (top?.mode == Mode.PLAYER) manager.pop()
+        if ((manager.top as? CarLyricsScreen)?.mode == Mode.SEARCH) return
+        (manager.top as? CarLyricsScreen ?: this).open(Mode.SEARCH)
     }
 
     private fun open(next: Mode, source: Source = Source.RECENT,
@@ -485,35 +533,44 @@ class CarLyricsScreen private constructor(
             next, source, collection, playlist))
     }
 
-    private fun returnToPlayer() {
-        if (!session.hasVideo) return
-        if (manager.screenStack.any { it.marker == PLAYER_MARKER }) manager.popTo(PLAYER_MARKER)
-        else open(Mode.PLAYER)
+    private fun currentVideo(): KaraokeVideo? = player.videoToSave(queue.getOrNull(selected))
+        ?: queue.getOrNull(selected) ?: history.all().firstOrNull()?.video
+
+    private fun returnToPlayer(resume: Boolean = false) {
+        val current = currentVideo() ?: return
+        if (!session.hasVideo) {
+            queue = listOf(current); selected = 0
+            if (!player.showCurrentVideo()) player.playFrom(current, history.all().firstOrNull { it.video.id == current.id }?.positionMs ?: 0)
+        } else player.showCurrentVideo()
+        if ((manager.top as? CarLyricsScreen)?.mode != Mode.PLAYER)
+            (manager.top as? CarLyricsScreen ?: this).open(Mode.PLAYER)
+        if (resume) player.resume()
         manager.top.invalidate()
     }
 
-    private fun nowPlayingAction() = Action.Builder().setTitle("Now playing")
-        .setIcon(icon(R.drawable.ic_video)).setOnClickListener { returnToPlayer() }.build()
+    private fun nowPlayingAction() = Action.Builder().setTitle("Play current video")
+        .setIcon(icon(R.drawable.ic_video)).setOnClickListener { returnToPlayer(resume = true) }.build()
 
     private fun searchAction() = Action.Builder().setIcon(icon(R.drawable.ic_mic))
         .setOnClickListener { openSearch() }.build()
 
     private fun header(title: String) = Header.Builder().setTitle(title)
         .setStartHeaderAction(if (ownsSession) Action.APP_ICON else Action.BACK).apply {
-            if (session.hasVideo) addEndHeaderAction(nowPlayingAction())
+            if (currentVideo() != null) addEndHeaderAction(nowPlayingAction())
             addEndHeaderAction(searchAction())
         }
 
     private fun contentLimit() = carContext.getCarService(ConstraintManager::class.java)
         .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST).let { if (it > 0) it.coerceAtMost(100) else 100 }
 
-    private fun select(videos: List<KaraokeVideo>, index: Int, listSource: String? = null) {
+    private fun select(videos: List<KaraokeVideo>, index: Int, listSource: String? = null, positionMs: Long = 0) {
         val video = videos.getOrNull(index) ?: return
         queue = videos.toList()
         session.listSource = listSource
         selected = index
         playback = PlaybackStatus.LOADING
-        player.select(video)
+        history.opened(video, positionMs)
+        if (positionMs > 0) player.playFrom(video, positionMs) else player.select(video)
         returnToPlayer()
     }
 
@@ -532,11 +589,45 @@ class CarLyricsScreen private constructor(
         queue = fresh
         selected = (nextIndex + queue.size) % queue.size
         playback = PlaybackStatus.LOADING
+        history.opened(queue[selected])
         player.select(queue[selected])
         invalidate()
     }
 
-    private fun browse() { manager.popToRoot() }
+    private fun browse() {
+        if (manager.top === this && (mode == Mode.PLAYER || mode == Mode.HOME)) manager.pop()
+    }
+
+    private fun homeTemplate(): Template {
+        val list = ItemList.Builder()
+        val cards = MorpheHomeFeed.cards
+        Thumbnails.request(cards.mapNotNull { it.video }) { }
+        val size = (contentLimit() - 1).coerceIn(1, 30)
+        homePage = homePage.coerceIn(0, ((cards.size - 1).coerceAtLeast(0) / size))
+        val visible = cards.drop(homePage * size).take(size)
+        visible.forEach { card ->
+            val row = Row.Builder().setTitle(card.title.take(100)).addText(card.channel)
+            val video = card.video
+            if (video != null) {
+                val bitmap = Thumbnails.get(video.id)
+                row.setImage(if (bitmap == null) icon(R.drawable.ic_video) else CarIcon.Builder(IconCompat.createWithBitmap(bitmap)).build(), Row.IMAGE_TYPE_SMALL)
+                row.setOnClickListener { select(cards.mapNotNull { it.video }, cards.mapNotNull { it.video }.indexOfFirst { it.id == video.id }) }
+            } else row.addText("Link unavailable • retry")
+            list.addItem(row.build())
+        }
+        if (MorpheHomeFeed.loading && cards.isEmpty()) list.addItem(Row.Builder().setTitle("Loading your recommendations…").build())
+        else if (MorpheHomeFeed.error != null && cards.isEmpty()) list.addItem(Row.Builder().setTitle("Home unavailable").addText(MorpheHomeFeed.error!!).build())
+        else if (cards.isEmpty()) list.addItem(Row.Builder().setTitle("Your Morphe recommendations").addText("Use Refresh to load your signed-in Home").build())
+        if (cards.isNotEmpty() && !MorpheHomeFeed.loading) list.addItem(Row.Builder().setTitle("More recommendations").setOnClickListener {
+            if ((homePage + 1) * size < cards.size) { homePage++; invalidate() }
+            else MorpheHomeFeed.load(carContext, more = true)
+        }.build())
+        val head = Header.Builder().setTitle("For you").setStartHeaderAction(Action.BACK)
+        if (currentVideo() != null) head.addEndHeaderAction(nowPlayingAction())
+        head.addEndHeaderAction(Action.Builder().setTitle(if (MorpheHomeFeed.loading) "Loading" else "Refresh")
+            .setOnClickListener { homePage = 0; MorpheHomeFeed.load(carContext, force = true) }.build())
+        return ListTemplate.Builder().setHeader(head.build()).setSingleList(list.build()).build()
+    }
 
     internal fun playbackChanged() {
         // A buffering transition must never redraw a menu under the knob or
@@ -579,7 +670,6 @@ class CarLyricsScreen private constructor(
     }
 
     private companion object {
-        const val PLAYER_MARKER = "current_player"
         const val QUEUE_SOURCE = "@queue"
     }
 }
@@ -593,7 +683,6 @@ private class CarPlaybackSession(val player: VideoPlayer) {
     var owner: Screen? = null
     var active: CarLyricsScreen? = null
     var surfaceRegistered = false
-    var afterRoot: (() -> Unit)? = null
     val hasVideo get() = selected in queue.indices
     init { player.onStatus = { status = it; active?.playbackChanged() } }
 }
